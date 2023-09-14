@@ -1,0 +1,11 @@
+{
+  "editor.formatOnSave": true,
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  "editor.codeActionsOnSave": {
+    "source.organizeImports": true
+  },
+
+  "nodejs-testing.extensions": [
+    { "extensions": ["ts"], "parameters": ["--loader", "tsx"] }
+  ]
+}

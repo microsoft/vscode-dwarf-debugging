@@ -1,0 +1,5 @@
+/*
+!/dist
+
+/chrome-cxx/**
+!/chrome-cxx/mnt/extension/*.d.ts
