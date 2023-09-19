@@ -1,6 +1,6 @@
 {
   "name": "@vscode/dwarf-debugging",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Enables DWARF debugging of webassembly in js-debug",
   "main": "dist/index.js",
   "scripts": {
