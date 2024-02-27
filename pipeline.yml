@@ -39,4 +39,7 @@ extends:
 
         testPlatforms: []
 
+        # Build container does not run on Windows
+        skipAPIScan: true
+
         publishPackage: ${{ parameters.publishPackage }}
