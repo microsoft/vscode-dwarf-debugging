@@ -1,0 +1,71 @@
+#!/usr/local/bin/node
+const fs = require('fs');
+const path = require('path');
+const yaml = require('js-yaml');
+
+const out = process.stdout.write.bind(process.stdout);
+const err = process.stderr.write.bind(process.stderr);
+
+const inputFiles = process.argv.slice(2);
+
+out(`rule build_dwp\n`);
+out(`  command = ${process.env['EMSDK']}/upstream/bin/llvm-dwp $in -o $out\n`);
+out(`  description = Generating dwp file, creating $out\n\n`);
+out(`rule build_wasm\n`);
+out(`  command = $compiler $flags $in -o $out\n`);
+out(`  description = Compiling file '$in' with flags: "$flags"\n\n`);
+
+for (const specFilePath of inputFiles) {
+  const { name, source_file: sourceFile, flags, use_dwo: useDwo } = yaml.load(fs.readFileSync(specFilePath, 'utf8'));
+
+  assert(specFilePath, typeof name === 'string', `Expected top level string property 'name'`);
+  assert(specFilePath, typeof sourceFile === 'string', `Expected top level string property 'source_file'`);
+  assert(specFilePath, Array.isArray(flags) && flags.every(Array.isArray), `Expected top level array of arrays property 'flags'`);
+
+  const sourceFilePath = resolvePath(specFilePath, sourceFile);
+  assert(specFilePath, fs.existsSync(sourceFilePath), `File does not exist: ${sourceFile}`);
+
+  const sourceFileIsCpp = ['.cc', '.cpp'].some(extname => extname === path.extname(sourceFilePath).toLowerCase());
+
+  for (let i = 0; i < flags.length; i++) {
+    const outputFile = testCaseOutputName(sourceFilePath, name, i);
+    const compiler = `${process.env['EMSDK']}/upstream/emscripten/${sourceFileIsCpp ? 'em++' : 'emcc'}`;
+    const compileFlags = flags[i].filter(f => !f.startsWith('-s')).join(' ');
+    const linkFlags = ['-sMODULARIZE=1', '-sEXIT_RUNTIME=1', '-sENVIRONMENT=node', ...flags[i]].join(' ');
+
+    const hasSplitDwarf = flags[i].includes('-gsplit-dwarf');
+    const additionalObjOutput = hasSplitDwarf ? ` | ${outputFile}.dwo` : '';
+
+    out(`build ${outputFile}.js | ${outputFile}.wasm: build_wasm ${outputFile}.o\n`);
+    out(`  compiler = ${compiler}\n`);
+    out(`  flags = ${linkFlags}\n\n`);
+    out(`build ${outputFile}.o${additionalObjOutput}: build_wasm ${encodeFilePath(sourceFilePath)}\n`);
+    out(`  compiler = ${compiler} -c\n`);
+    out(`  flags = ${compileFlags}\n\n`);
+    if (hasSplitDwarf && !useDwo) {
+      out(`build ${outputFile}.wasm.dwp: build_dwp ${outputFile}.dwo\n\n`);
+    }
+  }
+}
+
+function resolvePath(specFilePath, filePath) {
+  return path.resolve(
+    path.dirname(specFilePath),
+    filePath.replace(/\$([A-Z_]+)/g, (_, v) => process.env[v] || ''),
+  );
+}
+
+function encodeFilePath(filePath) {
+  return filePath.replace(/\$|\s/g, s => '$' + s);
+}
+
+function assert(specFilePath, condition, message) {
+  if (!condition) {
+    err(`[${specFilePath}]ERROR: ${message}\n`);
+    process.exit(-1);
+  }
+}
+
+function testCaseOutputName(sourceFilePath, name, i) {
+  return `${path.basename(sourceFilePath, path.extname(sourceFilePath))}__${name}_${i}`.replace(/[^0-9a-zA-Z]+/g, '_');
+}

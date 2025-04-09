@@ -3,38 +3,48 @@
 //
 // https://github.com/ChromeDevTools/devtools-frontend/blob/main/extensions/cxx_debugging/tests/SymbolsBackend_test.ts
 
-import createModule, {type SymbolsBackendTestsModule} from './SymbolsBackendTests.js';
+import assert from 'assert';
+import { describe, it } from 'node:test';
+import { createModuleRunner } from '../test-utils/emscripten-module-runner';
+import type { SymbolsBackendTestsModule } from '../wasm/symbols-backend/tests/SymbolsBackendTests';
+
+type ResponseWithError = { error?: { code: string; message: string; }; };
+
+function okReponse<T extends ResponseWithError>(response: T) {
+  if (response.error) {
+    assert.fail(`Expect succesfull response, got ${response.error.code}: ${response.error.message}`);
+  }
+  return response;
+}
 
 describe('SymbolsBackend', () => {
-  it('should work', async () => {
-    await createModule({
-      onExit(status: number) {
-        if (status !== 0) {
-          throw new Error(`Unittests failed (return code ${status})`);
-        }
-      },
+
+  it('runs WebAssembly test suite', async () => {
+    const moduleRunner = createModuleRunner<SymbolsBackendTestsModule>('tests/SymbolsBackendTests.js', { stdio: 'inherit' });
+
+    await moduleRunner.run(createModule => createModule({
       // @ts-expect-error
-      preRun({FS}: SymbolsBackendTestsModule) {  // eslint-disable-line @typescript-eslint/naming-convention
+      preRun({ FS }: SymbolsBackendTestsModule) {
         FS.mkdir('tests');
         FS.mkdir('tests/inputs');
         FS.mkdir('cxx_debugging');
         FS.mkdir('cxx_debugging/tests');
         FS.mkdir('cxx_debugging/tests/inputs');
         ['hello.s.wasm',
-         'windows_paths.s.wasm',
-         'globals.s.wasm',
-         'classstatic.s.wasm',
-         'namespaces.s.wasm',
-         'shadowing.s.wasm',
-         'inline.s.wasm',
+          'windows_paths.s.wasm',
+          'globals.s.wasm',
+          'classstatic.s.wasm',
+          'namespaces.s.wasm',
+          'shadowing.s.wasm',
+          'inline.s.wasm',
         ]
-            .forEach(
-                name => FS.createPreloadedFile(
-                    'cxx_debugging/tests/inputs', name, `build/tests/inputs/${name}`, true, false));
+          .forEach(
+            name => FS.createPreloadedFile(
+              'cxx_debugging/tests/inputs', name, `tests/inputs/${name}`, true, false));
         ['split-dwarf.s.dwo',
-         'split-dwarf.s.wasm',
-        ].forEach(name => FS.createPreloadedFile('tests/inputs', name, `build/tests/inputs/${name}`, true, false));
-      },
-    });
+          'split-dwarf.s.wasm',
+        ].forEach(name => FS.createPreloadedFile('tests/inputs', name, `tests/inputs/${name}`, true, false));
+      }
+    }));
   });
 });

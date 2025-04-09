@@ -76,8 +76,8 @@ macro(add_test_program program)
     -sMODULARIZE=1
     -sWASM_BIGINT
     -sEXPORT_NAME=loadModule
-    -sEXPORT_ES6=1
     -sEXPORT_ALL=1
+    -sENVIRONMENT=node
     -std=c++17
     -Wl,--export-all
     -Wl,--no-gc-sections
@@ -121,21 +121,8 @@ add_test_program(lldb_eval_inputs
   ${THIRD_PARTY_DIR}/lldb-eval/src/testdata/test_binary.cc
   ${THIRD_PARTY_DIR}/lldb-eval/src/testdata/test_library.cc)
 
-
-set(TEST_BINARY_INPUTS
- page.html
- page.js
- externref.js
- )
-
-set(binary_inputs)
-foreach(input IN LISTS TEST_BINARY_INPUTS)
-  list(APPEND binary_inputs ${CMAKE_CURRENT_BINARY_DIR}/${input})
-  add_custom_command(OUTPUT ${input} DEPENDS ${input}
-    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/${input} ${CMAKE_CURRENT_BINARY_DIR}/)
-endforeach()
-add_custom_target(SymbolsBackendTestInputs DEPENDS ${compiled_inputs} ${TEST_BINARY_INPUTS})
+add_custom_target(SymbolsBackendTestInputs DEPENDS ${compiled_inputs})
 add_custom_command(TARGET SymbolsBackendTestInputs POST_BUILD COMMAND rm ${missing_dwos})
 
-list(APPEND EXTENSION_TEST_BUILD_ARTIFACTS ${compiled_inputs} ${binary_inputs} ${compiled_wasm_inputs})
+list(APPEND EXTENSION_TEST_BUILD_ARTIFACTS ${compiled_inputs} ${compiled_wasm_inputs})
 set(EXTENSION_TEST_BUILD_ARTIFACTS ${EXTENSION_TEST_BUILD_ARTIFACTS} PARENT_SCOPE)

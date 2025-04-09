@@ -6,7 +6,7 @@
 name: Scope view formats primitive types correctly
 # This test checks that the scope view displays
 # integers, chars, float and doubles correctly
-source_file: //extensions/cxx_debugging/e2e/resources/scope-view-primitives.c
+source_file: resources/scope-view-primitives.c
 flags: [
   [-g, -fdebug-compilation-dir=., -fno-limit-debug-info, -sWASM_BIGINT, -sERROR_ON_WASM_CHANGES_AFTER_LINK],
   [-g, -fdebug-compilation-dir=., -fno-limit-debug-info, -sWASM_BIGINT, -sERROR_ON_WASM_CHANGES_AFTER_LINK, -gsplit-dwarf],
@@ -25,7 +25,7 @@ script:
       - name: Local.i
         value: 10
       - name: Local.c
-        value: "\"'a'\""
+        value: "'a'"
       - name: Local.f
         value: 1.10000002
       - name: Local.d

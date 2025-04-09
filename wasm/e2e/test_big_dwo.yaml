@@ -4,8 +4,8 @@
 # https://github.com/ChromeDevTools/devtools-frontend/blob/main/extensions/cxx_debugging/e2e/tests/test_big_dwo.yaml
 
 name: Successfully loads large dwo files
-source_file: //extensions/cxx_debugging/e2e/resources/huge-source-file.cc
-use_dwo:
+source_file: resources/huge-source-file.cc
+use_dwo: true
 flags: [
   [-g, -fdebug-compilation-dir=., -gdwarf-5, -sWASM_BIGINT, -sERROR_ON_WASM_CHANGES_AFTER_LINK, -gsplit-dwarf, -gpubnames]]
 script:

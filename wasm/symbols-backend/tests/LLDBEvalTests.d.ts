@@ -1,12 +1,12 @@
 // Copyright 2023 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the wasm/symbols-backend/LICENSE file.
-import type {Vector} from '../src/SymbolsBackend.js';
+import type { Vector } from '../../../src/SymbolsBackend';
 
 export interface Debugger {
-  runToLine(line: string): Promise<void>;
-  evaluate(expr: string): Promise<EvalResult>;
-  exit(): Promise<void>;
+  runToLine(line: string): void;
+  evaluate(expr: string): EvalResult;
+  exit(): void;
 }
 
 export interface EvalResult {
@@ -14,11 +14,11 @@ export interface EvalResult {
   result?: string;
 }
 
-interface Module extends EmscriptenModule {
+export interface LLDBEvalTestsModule extends EmscriptenModule {
   // eslint-disable-next-line @typescript-eslint/naming-convention
   StringArray: Vector<string>;
-  runTests(dbg: Debugger, args: Vector<string>): Promise<number>;
+  runTests(dbg: Debugger, args: Vector<string>): number;
 }
 
-declare let loadModule: EmscriptenModuleFactory<Module>;
+declare let loadModule: EmscriptenModuleFactory<LLDBEvalTestsModule>;
 export default loadModule;

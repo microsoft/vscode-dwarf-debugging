@@ -16,7 +16,7 @@ export interface Vector<T> extends EmbindObject {
   push_back(value: T): void;
 }
 
-export interface ErrorCode extends EmbindObject {}
+export interface ErrorCode extends EmbindObject { }
 
 export interface Error extends EmbindObject {
   code: ErrorCode;
@@ -42,7 +42,7 @@ export interface SourceLocation extends EmbindObject {
   columnNumber: number;
 }
 
-export interface VariableScope extends EmbindObject {}
+export interface VariableScope extends EmbindObject { }
 
 export interface Variable extends EmbindObject {
   scope: VariableScope;
@@ -52,7 +52,7 @@ export interface Variable extends EmbindObject {
 }
 
 export interface FieldInfo extends EmbindObject {
-  name: string|undefined;
+  name: string | undefined;
   offset: number;
   typeId: string;
 }
@@ -70,7 +70,7 @@ export interface TypeInfo extends EmbindObject {
   size: number;
   canExpand: boolean;
   hasValue: boolean;
-  arraySize: number|undefined;
+  arraySize: number | undefined;
   isPointer: boolean;
   members: Vector<FieldInfo>;
   enumerators: Vector<Enumerator>;
@@ -79,62 +79,62 @@ export interface TypeInfo extends EmbindObject {
 export interface AddRawModuleResponse extends EmbindObject {
   sources: Vector<string>;
   dwos: Vector<string>;
-  error: Error|undefined;
+  error: Error | undefined;
 }
 
 export interface SourceLocationToRawLocationResponse extends EmbindObject {
   rawLocationRanges: Vector<RawLocationRange>;
-  error: Error|undefined;
+  error: Error | undefined;
 }
 
 export interface RawLocationToSourceLocationResponse extends EmbindObject {
   sourceLocation: Vector<SourceLocation>;
-  error: Error|undefined;
+  error: Error | undefined;
 }
 
 export interface ListVariablesInScopeResponse extends EmbindObject {
   variable: Vector<Variable>;
-  error: Error|undefined;
+  error: Error | undefined;
 }
 
 export interface GetFunctionInfoResponse extends EmbindObject {
   functionNames: Vector<string>;
   missingSymbolFiles: Vector<string>;
-  error: Error|undefined;
+  error: Error | undefined;
 }
 
 export interface GetInlinedFunctionRangesResponse extends EmbindObject {
   rawLocationRanges: Vector<RawLocationRange>;
-  error: Error|undefined;
+  error: Error | undefined;
 }
 
 export interface GetInlinedCalleesRangesResponse extends EmbindObject {
   rawLocationRanges: Vector<RawLocationRange>;
-  error: Error|undefined;
+  error: Error | undefined;
 }
 
 export interface GetMappedLinesResponse extends EmbindObject {
   MappedLines: Vector<number>;
-  error: Error|undefined;
+  error: Error | undefined;
 }
 
 export interface EvaluateExpressionResponse extends EmbindObject {
   typeInfos: Vector<TypeInfo>;
   root: TypeInfo;
-  displayValue: string|undefined;
-  location: number|undefined;
-  memoryAddress: number|undefined;
-  data: Vector<number>|undefined;
-  error: Error|undefined;
+  displayValue: string | undefined;
+  location: number | undefined;
+  memoryAddress: number | undefined;
+  data: Vector<number> | undefined;
+  error: Error | undefined;
 }
 
 export interface DWARFSymbolsPlugin extends EmbindObject {
   AddRawModule(rawModuleId: string, path: string): AddRawModuleResponse;
   RemoveRawModule(rawModuleId: string): void;
   SourceLocationToRawLocation(rawModuleId: string, sourceFileURL: string, lineNumber: number, columnNumber: number):
-      SourceLocationToRawLocationResponse;
+    SourceLocationToRawLocationResponse;
   RawLocationToSourceLocation(rawModuleId: string, codeOffset: number, inlineFrameIndex: number):
-      RawLocationToSourceLocationResponse;
+    RawLocationToSourceLocationResponse;
   ListVariablesInScope(rawModuleId: string, codeOffset: number, inlineFrameIndex: number): ListVariablesInScopeResponse;
   GetFunctionInfo(rawModuleId: string, codeOffset: number): GetFunctionInfoResponse;
   GetInlinedFunctionRanges(rawModuleId: string, codeOffset: number): GetInlinedFunctionRangesResponse;

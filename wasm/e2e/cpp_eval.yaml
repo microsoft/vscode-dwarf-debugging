@@ -4,12 +4,12 @@
 # https://github.com/ChromeDevTools/devtools-frontend/blob/main/extensions/cxx_debugging/e2e/tests/cpp_eval.yaml
 
 name: Cpp expression evaluation
-source_file: //extensions/cxx_debugging/e2e/resources/stepping-with-state.c
+source_file: resources/stepping-with-state.c
 flags: [
   [-g, -fdebug-compilation-dir=., -fno-limit-debug-info, -sWASM_BIGINT, -sERROR_ON_WASM_CHANGES_AFTER_LINK],
   [-g, -fdebug-compilation-dir=., -gdwarf-5, -sWASM_BIGINT, -sERROR_ON_WASM_CHANGES_AFTER_LINK],
   [-g, -fdebug-compilation-dir=., -gdwarf-5, -sWASM_BIGINT, -sERROR_ON_WASM_CHANGES_AFTER_LINK, -gsplit-dwarf, -gpubnames]]
-use_dwo:
+use_dwo: true
 script:
   - reason: setup
     actions:
@@ -35,4 +35,4 @@ script:
       - expression: 1 == 1
         value: true
       - expression: (char)65
-        value: "\"'A'\""
+        value: "'A'"

@@ -7,9 +7,9 @@ name: Scope view formats non primitive types correctly for cpp
 # This test checks that the scope view displays
 # arrays, structs, references, pointers and
 # classes correctly for C++
-source_file: //extensions/cxx_debugging/e2e/resources/scope-view-non-primitives.cpp
+source_file: resources/scope-view-non-primitives.cpp
 flags: [
-  [-g, -fdebug-compilation-dir=., -fno-limit-debug-info -sWASM_BIGINT, -sERROR_ON_WASM_CHANGES_AFTER_LINK],
+  [-g, -fdebug-compilation-dir=., -fno-limit-debug-info, -sWASM_BIGINT, -sERROR_ON_WASM_CHANGES_AFTER_LINK],
   [-g, -fdebug-compilation-dir=., -fno-limit-debug-info, -sWASM_BIGINT, -sERROR_ON_WASM_CHANGES_AFTER_LINK, -gsplit-dwarf],
   [-g, -fdebug-compilation-dir=., -gdwarf-5, -sWASM_BIGINT, -sERROR_ON_WASM_CHANGES_AFTER_LINK],
   [-g, -fdebug-compilation-dir=., -gdwarf-5, -sWASM_BIGINT, -sERROR_ON_WASM_CHANGES_AFTER_LINK, -gsplit-dwarf, -gpubnames]]
