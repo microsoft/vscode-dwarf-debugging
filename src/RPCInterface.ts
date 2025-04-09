@@ -3,12 +3,11 @@
 //
 // https://github.com/ChromeDevTools/devtools-frontend/blob/main/extensions/cxx_debugging/src/DevToolsPluginWorker.ts
 
-import type {Chrome} from '../../../extension-api/ExtensionAPI.js';
+import type { Chrome } from './ExtensionAPI';
 
-import {createPlugin, type ResourceLoader} from './DWARFSymbols.js';
-import type {ModuleConfigurations} from './ModuleConfiguration.js';
-import {deserializeWasmMemory, deserializeWasmValue, kMaxWasmValueSize, type WasmValue} from './WasmTypes.js';
-import {type Channel, type HostInterface, SynchronousIOMessage, type WorkerInterface, WorkerRPC} from './WorkerRPC.js';
+import { createPlugin, type ResourceLoader } from './DWARFLanguageExtensionPlugin';
+import { deserializeWasmMemory, deserializeWasmValue, kMaxWasmValueSize, type WasmValue } from './WasmTypes';
+import { type Channel, type HostInterface, SynchronousIOMessage, type WorkerInterface, WorkerRPC } from './WorkerRPC';
 
 class SynchronousLinearMemoryMessage extends SynchronousIOMessage<ArrayBuffer> {
   deserialize(length: number): ArrayBuffer {
@@ -44,25 +43,25 @@ export class RPCInterface implements WorkerInterface, HostInterface {
 
   getWasmLinearMemory(offset: number, length: number, stopId: unknown): ArrayBuffer {
     return this.rpc.sendMessageSync(
-        new SynchronousLinearMemoryMessage(length), 'getWasmLinearMemory', offset, length, stopId);
+      new SynchronousLinearMemoryMessage(length), 'getWasmLinearMemory', offset, length, stopId);
   }
   getWasmLocal(local: number, stopId: unknown): WasmValue {
     return this.rpc.sendMessageSync(new SynchronousWasmValueMessage(kMaxWasmValueSize), 'getWasmLocal', local, stopId);
   }
   getWasmGlobal(global: number, stopId: unknown): WasmValue {
     return this.rpc.sendMessageSync(
-        new SynchronousWasmValueMessage(kMaxWasmValueSize), 'getWasmGlobal', global, stopId);
+      new SynchronousWasmValueMessage(kMaxWasmValueSize), 'getWasmGlobal', global, stopId);
   }
   getWasmOp(op: number, stopId: unknown): WasmValue {
     return this.rpc.sendMessageSync(new SynchronousWasmValueMessage(kMaxWasmValueSize), 'getWasmOp', op, stopId);
   }
-  reportResourceLoad(resourceUrl: string, status: {success: boolean, errorMessage?: string, size?: number}):
-      Promise<void> {
+  reportResourceLoad(resourceUrl: string, status: { success: boolean, errorMessage?: string, size?: number; }):
+    Promise<void> {
     return this.rpc.sendMessage('reportResourceLoad', resourceUrl, status);
   }
 
   evaluate(expression: string, context: Chrome.DevTools.RawLocation, stopId: unknown):
-      Promise<Chrome.DevTools.RemoteObject|Chrome.DevTools.ForeignObject|null> {
+    Promise<Chrome.DevTools.RemoteObject | Chrome.DevTools.ForeignObject | null> {
     if (this.plugin.evaluate) {
       return this.plugin.evaluate(expression, context, stopId);
     }
@@ -81,12 +80,12 @@ export class RPCInterface implements WorkerInterface, HostInterface {
     return Promise.resolve();
   }
 
-  addRawModule(rawModuleId: string, symbolsURL: string|undefined, rawModule: Chrome.DevTools.RawModule):
-      Promise<string[]|{missingSymbolFiles: string[]}> {
+  addRawModule(rawModuleId: string, symbolsURL: string | undefined, rawModule: Chrome.DevTools.RawModule):
+    Promise<string[] | { missingSymbolFiles: string[]; }> {
     return this.plugin.addRawModule(rawModuleId, symbolsURL, rawModule);
   }
   sourceLocationToRawLocation(sourceLocation: Chrome.DevTools.SourceLocation):
-      Promise<Chrome.DevTools.RawLocationRange[]> {
+    Promise<Chrome.DevTools.RawLocationRange[]> {
     return this.plugin.sourceLocationToRawLocation(sourceLocation);
   }
   rawLocationToSourceLocation(rawLocation: Chrome.DevTools.RawLocation): Promise<Chrome.DevTools.SourceLocation[]> {
@@ -102,8 +101,8 @@ export class RPCInterface implements WorkerInterface, HostInterface {
     return this.plugin.removeRawModule(rawModuleId);
   }
   getFunctionInfo(rawLocation: Chrome.DevTools.RawLocation):
-      Promise<{frames: Chrome.DevTools.FunctionInfo[], missingSymbolFiles: string[]}|
-              {frames: Chrome.DevTools.FunctionInfo[]}|{missingSymbolFiles: string[]}> {
+    Promise<{ frames: Chrome.DevTools.FunctionInfo[], missingSymbolFiles: string[]; } |
+    { frames: Chrome.DevTools.FunctionInfo[]; } | { missingSymbolFiles: string[]; }> {
     return this.plugin.getFunctionInfo(rawLocation);
   }
   getInlinedFunctionRanges(rawLocation: Chrome.DevTools.RawLocation): Promise<Chrome.DevTools.RawLocationRange[]> {
@@ -112,10 +111,11 @@ export class RPCInterface implements WorkerInterface, HostInterface {
   getInlinedCalleesRanges(rawLocation: Chrome.DevTools.RawLocation): Promise<Chrome.DevTools.RawLocationRange[]> {
     return this.plugin.getInlinedCalleesRanges(rawLocation);
   }
-  getMappedLines(rawModuleId: string, sourceFileURL: string): Promise<number[]|undefined> {
+  getMappedLines(rawModuleId: string, sourceFileURL: string): Promise<number[] | undefined> {
     return this.plugin.getMappedLines(rawModuleId, sourceFileURL);
   }
-  async hello(moduleConfigurations: ModuleConfigurations, logPluginApiCalls: boolean): Promise<void> {
-    this.#plugin = await createPlugin(this, this.resourceLoader, moduleConfigurations, logPluginApiCalls);
+  async hello(moduleConfiguration: { logPluginApiCalls?: boolean; } | unknown[], logPluginApiCalls?: boolean): Promise<void> {
+    logPluginApiCalls = (Array.isArray(moduleConfiguration) ? logPluginApiCalls : moduleConfiguration.logPluginApiCalls) || false;
+    this.#plugin = await createPlugin(this, this.resourceLoader, logPluginApiCalls);
   }
 }

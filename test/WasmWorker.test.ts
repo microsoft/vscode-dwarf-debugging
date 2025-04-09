@@ -1,4 +1,4 @@
-import * as assert from 'assert';
+import assert from 'assert';
 import { afterEach, beforeEach, describe, it } from 'node:test';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
@@ -6,11 +6,17 @@ import { IWasmWorker, spawn } from '../dist';
 
 // This test with mandelbrot.wasm which was pulled from https://emscripten-dbg-stories.netlify.app/mandelbrot.html
 
-describe('dwarf-debugging', () => {
+describe('WasmWorker', () => {
   let s: IWasmWorker;
 
   beforeEach(() => {
-    s = spawn({} as any);
+    s = spawn({
+      getWasmLinearMemory: async (offset, length, stopId) => new ArrayBuffer(0),
+      getWasmLocal: async (local, stopId) => ({ type: 'i32', value: 0 }),
+      getWasmGlobal: async (global, stopId) => ({ type: 'i32', value: 0 }),
+      getWasmOp: async (op, stopId) => ({ type: 'i32', value: 0 }),
+      reportResourceLoad: async (resourceUrl, status) => { }
+    });
   });
 
   afterEach(async () => {
@@ -18,9 +24,9 @@ describe('dwarf-debugging', () => {
   });
 
   it('adds a module and reads sources', async () => {
-    await s.rpc.sendMessage('hello', [], false);
+    s.rpc.sendMessage('hello', [], false);
     const r = await s.rpc.sendMessage('addRawModule', 'someId', '', {
-      url: pathToFileURL(join(__dirname, 'mandelbrot.wasm')).toString(),
+      url: pathToFileURL(join(__dirname, 'resources/mandelbrot.wasm')).toString(),
     });
 
     assert.ok(r instanceof Array, 'r is an array');
@@ -34,9 +40,9 @@ describe('dwarf-debugging', () => {
     let sources: string[];
     let mandelbrotcc: string;
     beforeEach(async () => {
-      await s.rpc.sendMessage('hello', [], false);
+      s.rpc.sendMessage('hello', [], false);
       const r = await s.rpc.sendMessage('addRawModule', 'someId', '', {
-        url: pathToFileURL(join(__dirname, 'mandelbrot.wasm')).toString(),
+        url: pathToFileURL(join(__dirname, 'resources/mandelbrot.wasm')).toString(),
       });
       sources = r as string[];
       mandelbrotcc = sources.find((r) => r.endsWith('mandelbrot.cc'))!;

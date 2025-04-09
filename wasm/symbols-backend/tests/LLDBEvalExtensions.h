@@ -54,14 +54,13 @@ class EvalTest : public ::testing::Test {
     std::string test_name =
         ::testing::UnitTest::GetInstance()->current_test_info()->name();
     std::string break_line = "// BREAK(" + test_name + ")";
-    debugger.call<emscripten::val>("runToLine", break_line).await();
+    debugger.call<emscripten::val>("runToLine", break_line);
   }
 
-  void TearDown() { debugger.call<emscripten::val>("exit").await(); }
+  void TearDown() { debugger.call<emscripten::val>("exit"); }
 
-  EvalResult Eval(const std::string& expr) const {
-    const auto evalResult =
-        debugger.call<emscripten::val>("evaluate", expr).await();
+  EvalResult Eval(const std::string &expr) const {
+    const auto evalResult = debugger.call<emscripten::val>("evaluate", expr);
     const auto result = evalResult["result"];
     const auto error = evalResult["error"];
     return {result.as<bool>() ? result.as<std::string>() : std::string(),

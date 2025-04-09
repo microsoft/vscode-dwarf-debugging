@@ -4,7 +4,7 @@
 # https://github.com/ChromeDevTools/devtools-frontend/blob/main/extensions/cxx_debugging/e2e/tests/test_loop.yaml
 
 name: test_loop
-source_file: //third_party/emscripten-releases/install/emscripten/tests/core/test_loop.c
+source_file: $EMSDK/upstream/emscripten/tests/core/test_loop.c
 flags: [[-g, -fdebug-compilation-dir=., -sWASM_BIGINT, -sERROR_ON_WASM_CHANGES_AFTER_LINK]]
 script:
   - reason: setup

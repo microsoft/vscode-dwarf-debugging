@@ -4,7 +4,7 @@
 # https://github.com/ChromeDevTools/devtools-frontend/blob/main/extensions/cxx_debugging/e2e/tests/test_wasm_simd.yaml
 
 name: test_wasm_simd
-source_file: //extensions/cxx_debugging/e2e/resources/test_wasm_simd.c
+source_file: resources/test_wasm_simd.c
 flags: [
   [-g, -msimd128, -fdebug-compilation-dir=., -sWASM_BIGINT, -sERROR_ON_WASM_CHANGES_AFTER_LINK],
   [-g, -msimd128, -fdebug-compilation-dir=., -sWASM_BIGINT, -sERROR_ON_WASM_CHANGES_AFTER_LINK, -gsplit-dwarf],

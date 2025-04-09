@@ -3,13 +3,16 @@
 //
 // https://github.com/ChromeDevTools/devtools-frontend/blob/main/extensions/cxx_debugging/src/WorkerRPC.ts
 
-import type {Chrome} from '../../../extension-api/ExtensionAPI.js';
+import type { Chrome } from './ExtensionAPI';
 
-import type {ModuleConfigurations} from './ModuleConfiguration.js';
-import {type SerializedWasmType, serializeWasmValue, type WasmValue} from './WasmTypes.js';
+import { type SerializedWasmType, serializeWasmValue, type WasmValue } from './WasmTypes';
 
 export interface WorkerInterface extends Chrome.DevTools.LanguageExtensionPlugin {
-  hello(moduleConfigurations: ModuleConfigurations, logPluginApiCalls: boolean): void;
+  hello(moduleConfiguration: { logPluginApiCalls?: boolean; }): void;
+  /**
+   * @deprecated Only for compatibility with @vscode/js-debug
+   */
+  hello(moduleConfigurations: unknown[], logPluginApiCalls: boolean): void;
 }
 
 export interface AsyncHostInterface {
@@ -17,8 +20,8 @@ export interface AsyncHostInterface {
   getWasmLocal(local: number, stopId: unknown): Promise<WasmValue>;
   getWasmGlobal(global: number, stopId: unknown): Promise<WasmValue>;
   getWasmOp(op: number, stopId: unknown): Promise<WasmValue>;
-  reportResourceLoad(resourceUrl: string, status: {success: boolean, errorMessage?: string, size?: number}):
-      Promise<void>;
+  reportResourceLoad(resourceUrl: string, status: { success: boolean, errorMessage?: string, size?: number; }):
+    Promise<void>;
 }
 
 export interface HostInterface {
@@ -26,23 +29,23 @@ export interface HostInterface {
   getWasmLocal(local: number, stopId: unknown): WasmValue;
   getWasmGlobal(global: number, stopId: unknown): WasmValue;
   getWasmOp(op: number, stopId: unknown): WasmValue;
-  reportResourceLoad(resourceUrl: string, status: {success: boolean, errorMessage?: string, size?: number}):
-      Promise<void>;
+  reportResourceLoad(resourceUrl: string, status: { success: boolean, errorMessage?: string, size?: number; }):
+    Promise<void>;
 }
 
 /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
 type AllMessages<Interface extends Record<string, any>> = {
-  [k in keyof Interface]: {method: k, params: Parameters<Interface[k]>}
+  [k in keyof Interface]: { method: k, params: Parameters<Interface[k]>; }
 };
 
 type Message<Interface extends Object> = {
   requestId: number,
-}&({request: AllMessages<Interface>[keyof AllMessages<Interface>]}|{
+} & ({ request: AllMessages<Interface>[keyof AllMessages<Interface>]; } | {
   /* eslint-disable-next-line @typescript-eslint/naming-convention */
   sync_request: {
     request: AllMessages<Interface>[keyof AllMessages<Interface>],
     /* eslint-disable-next-line @typescript-eslint/naming-convention */
-    io_buffer: {semaphore: SharedArrayBuffer, data: SharedArrayBuffer},
+    io_buffer: { semaphore: SharedArrayBuffer, data: SharedArrayBuffer; },
   },
 });
 
@@ -50,7 +53,7 @@ export interface Channel<LocalInterface extends Object, RemoteInterface extends 
   /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
   postMessage(message: /* Response<LocalInterface>|Message<RemoteInterface>*/ any): any;
   /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
-  onmessage: ((e: MessageEvent<Message<LocalInterface>|Response<RemoteInterface>>) => any)|null;
+  onmessage: ((e: MessageEvent<Message<LocalInterface> | Response<RemoteInterface>>) => any) | null;
 }
 
 /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
@@ -60,7 +63,7 @@ type AllResponses<Interface extends Record<string, any>> = {
 
 type Response<Interface extends Object> = {
   requestId: number,
-}&({error: string}|{response: AllResponses<Interface>[keyof AllResponses<Interface>]});
+} & ({ error: string; } | { response: AllResponses<Interface>[keyof AllResponses<Interface>]; });
 
 export abstract class SynchronousIOMessage<T> {
   readonly buffer: SharedArrayBuffer;
@@ -70,7 +73,7 @@ export abstract class SynchronousIOMessage<T> {
 
   abstract deserialize(response: number): T;
 
-  static serialize(value: ArrayBuffer|WasmValue, buffer: SharedArrayBuffer): SerializedWasmType {
+  static serialize(value: ArrayBuffer | WasmValue, buffer: SharedArrayBuffer): SerializedWasmType {
     return serializeWasmValue(value, buffer);
   }
 }
@@ -80,7 +83,7 @@ export class WorkerRPC<LocalInterface extends Record<string, any>, RemoteInterfa
   private nextRequestId = 0;
   private readonly channel: Channel<LocalInterface, RemoteInterface>;
   private readonly localHandler: LocalInterface;
-  private readonly requests = new Map<number, {resolve: (params: unknown) => void, reject: (message: Error) => void}>();
+  private readonly requests = new Map<number, { resolve: (params: unknown) => void, reject: (message: Error) => void; }>();
   private readonly semaphore: Int32Array;
 
   constructor(channel: Channel<LocalInterface, RemoteInterface>, localHandler: LocalInterface) {
@@ -91,25 +94,25 @@ export class WorkerRPC<LocalInterface extends Record<string, any>, RemoteInterfa
   }
 
   sendMessage<Method extends keyof RemoteInterface>(method: Method, ...params: Parameters<RemoteInterface[Method]>):
-      ReturnType<RemoteInterface[Method]> {
+    ReturnType<RemoteInterface[Method]> {
     const requestId = this.nextRequestId++;
     const promise = new Promise((resolve, reject) => {
-      this.requests.set(requestId, {resolve, reject});
+      this.requests.set(requestId, { resolve, reject });
     });
-    this.channel.postMessage({requestId, request: {method, params}});
+    this.channel.postMessage({ requestId, request: { method, params } });
     return promise as ReturnType<RemoteInterface[Method]>;
   }
 
   sendMessageSync<Method extends keyof RemoteInterface>(
-      message: SynchronousIOMessage<ReturnType<RemoteInterface[Method]>>, method: Method,
-      ...params: Parameters<RemoteInterface[Method]>): ReturnType<RemoteInterface[Method]> {
+    message: SynchronousIOMessage<ReturnType<RemoteInterface[Method]>>, method: Method,
+    ...params: Parameters<RemoteInterface[Method]>): ReturnType<RemoteInterface[Method]> {
     const requestId = this.nextRequestId++;
     Atomics.store(this.semaphore, 0, 0);
     this.channel.postMessage({
       requestId,
       sync_request: {
-        request: {method, params},
-        io_buffer: {semaphore: this.semaphore.buffer as SharedArrayBuffer, data: message.buffer},
+        request: { method, params },
+        io_buffer: { semaphore: this.semaphore.buffer as SharedArrayBuffer, data: message.buffer },
       },
     });
     while (Atomics.wait(this.semaphore, 0, 0) !== 'not-equal') {
@@ -121,18 +124,18 @@ export class WorkerRPC<LocalInterface extends Record<string, any>, RemoteInterfa
   }
 
   private async onmessage(
-      event: MessageEvent<Message<LocalInterface>|Message<LocalInterface>|Response<RemoteInterface>>): Promise<void> {
+    event: MessageEvent<Message<LocalInterface> | Message<LocalInterface> | Response<RemoteInterface>>): Promise<void> {
     if ('request' in event.data) {
-      const {requestId, request} = event.data;
+      const { requestId, request } = event.data;
       try {
         const response = await this.localHandler[request.method](...request.params);
-        this.channel.postMessage({requestId, response});
+        this.channel.postMessage({ requestId, response });
       } catch (error) {
-        this.channel.postMessage({requestId, error: `${error}`});
+        this.channel.postMessage({ requestId, error: `${error}` });
       }
     } else if ('sync_request' in event.data) {
       /* eslint-disable-next-line @typescript-eslint/naming-convention */
-      const {sync_request: {request, io_buffer}} = event.data;
+      const { sync_request: { request, io_buffer } } = event.data;
       let signal = -1;
       try {
         const response = await this.localHandler[request.method](...request.params);
@@ -145,10 +148,10 @@ export class WorkerRPC<LocalInterface extends Record<string, any>, RemoteInterfa
         Atomics.notify(semaphore, 0);
       }
     } else {
-      const {requestId} = event.data;
+      const { requestId } = event.data;
       const callbacks = this.requests.get(requestId);
       if (callbacks) {
-        const {resolve, reject} = callbacks;
+        const { resolve, reject } = callbacks;
         if ('error' in event.data) {
           reject(new Error(event.data.error));
         } else {

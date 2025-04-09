@@ -3,14 +3,14 @@
 //
 // https://github.com/ChromeDevTools/devtools-frontend/blob/main/extensions/cxx_debugging/src/CustomFormatters.ts
 
-import type {Chrome} from '../../../extension-api/ExtensionAPI.js';
+import type { Chrome } from './ExtensionAPI';
 
-import type {WasmValue} from './WasmTypes.js';
-import type {HostInterface} from './WorkerRPC.js';
+import type { WasmValue } from './WasmTypes';
+import type { HostInterface } from './WorkerRPC';
 
 export interface FieldInfo {
   typeId: string;
-  name: string|undefined;
+  name: string | undefined;
   offset: number;
 }
 
@@ -55,7 +55,7 @@ export interface Value {
   asFloat32: () => number;
   asFloat64: () => number;
   asDataView: (offset?: number, size?: number) => DataView<ArrayBuffer>;
-  $: (member: string|number) => Value;
+  $: (member: string | number) => Value;
   getMembers(): string[];
 }
 
@@ -123,11 +123,11 @@ export class PageStore {
     return begin - 1;
   }
 
-  findSlice(offset: number): MemorySlice|null {
+  findSlice(offset: number): MemorySlice | null {
     return this.getSlice(this.findSliceIndex(offset), offset);
   }
 
-  private getSlice(index: number, offset: number): MemorySlice|null {
+  private getSlice(index: number, offset: number): MemorySlice | null {
     if (index < 0) {
       return null;
     }
@@ -135,7 +135,7 @@ export class PageStore {
     return candidate?.contains(offset) ? candidate : null;
   }
 
-  addSlice(buffer: ArrayBuffer|number[], begin: number): MemorySlice {
+  addSlice(buffer: ArrayBuffer | number[], begin: number): MemorySlice {
     let slice = new MemorySlice(Array.isArray(buffer) ? new Uint8Array(buffer).buffer : buffer, begin);
 
     let leftPosition = this.findSliceIndex(slice.begin - 1);
@@ -151,12 +151,13 @@ export class PageStore {
       slice = slice.merge(rightOverlap);
     }
     this.slices.splice(
-        leftPosition,                      // Insert to the right if no overlap
-        rightPosition - leftPosition + 1,  // Delete one additional slice if overlapping on the left
-        slice);
+      leftPosition,                      // Insert to the right if no overlap
+      rightPosition - leftPosition + 1,  // Delete one additional slice if overlapping on the left
+      slice);
     return slice;
   }
 }
+
 export class WasmMemoryView {
   private readonly wasm: WasmInterface;
   private readonly pages = new PageStore();
@@ -166,13 +167,13 @@ export class WasmMemoryView {
     this.wasm = wasm;
   }
 
-  private page(byteOffset: number, byteLength: number): {page: number, offset: number, count: number} {
+  private page(byteOffset: number, byteLength: number): { page: number, offset: number, count: number; } {
     const mask = WasmMemoryView.PAGE_SIZE - 1;
     const offset = byteOffset & mask;
     const page = byteOffset - offset;
     const rangeEnd = byteOffset + byteLength;
     const count = 1 + Math.ceil((rangeEnd - (rangeEnd & mask) - page) / WasmMemoryView.PAGE_SIZE);
-    return {page, offset, count};
+    return { page, offset, count };
   }
 
   private getPages(page: number, count: number): DataView<ArrayBuffer> {
@@ -192,57 +193,57 @@ export class WasmMemoryView {
   }
 
   getFloat32(byteOffset: number, littleEndian?: boolean): number {
-    const {offset, page, count} = this.page(byteOffset, 4);
+    const { offset, page, count } = this.page(byteOffset, 4);
     const view = this.getPages(page, count);
     return view.getFloat32(offset, littleEndian);
   }
   getFloat64(byteOffset: number, littleEndian?: boolean): number {
-    const {offset, page, count} = this.page(byteOffset, 8);
+    const { offset, page, count } = this.page(byteOffset, 8);
     const view = this.getPages(page, count);
     return view.getFloat64(offset, littleEndian);
   }
   getInt8(byteOffset: number): number {
-    const {offset, page, count} = this.page(byteOffset, 1);
+    const { offset, page, count } = this.page(byteOffset, 1);
     const view = this.getPages(page, count);
     return view.getInt8(offset);
   }
   getInt16(byteOffset: number, littleEndian?: boolean): number {
-    const {offset, page, count} = this.page(byteOffset, 2);
+    const { offset, page, count } = this.page(byteOffset, 2);
     const view = this.getPages(page, count);
     return view.getInt16(offset, littleEndian);
   }
   getInt32(byteOffset: number, littleEndian?: boolean): number {
-    const {offset, page, count} = this.page(byteOffset, 4);
+    const { offset, page, count } = this.page(byteOffset, 4);
     const view = this.getPages(page, count);
     return view.getInt32(offset, littleEndian);
   }
   getUint8(byteOffset: number): number {
-    const {offset, page, count} = this.page(byteOffset, 1);
+    const { offset, page, count } = this.page(byteOffset, 1);
     const view = this.getPages(page, count);
     return view.getUint8(offset);
   }
   getUint16(byteOffset: number, littleEndian?: boolean): number {
-    const {offset, page, count} = this.page(byteOffset, 2);
+    const { offset, page, count } = this.page(byteOffset, 2);
     const view = this.getPages(page, count);
     return view.getUint16(offset, littleEndian);
   }
   getUint32(byteOffset: number, littleEndian?: boolean): number {
-    const {offset, page, count} = this.page(byteOffset, 4);
+    const { offset, page, count } = this.page(byteOffset, 4);
     const view = this.getPages(page, count);
     return view.getUint32(offset, littleEndian);
   }
   getBigInt64(byteOffset: number, littleEndian?: boolean): bigint {
-    const {offset, page, count} = this.page(byteOffset, 8);
+    const { offset, page, count } = this.page(byteOffset, 8);
     const view = this.getPages(page, count);
     return view.getBigInt64(offset, littleEndian);
   }
   getBigUint64(byteOffset: number, littleEndian?: boolean): bigint {
-    const {offset, page, count} = this.page(byteOffset, 8);
+    const { offset, page, count } = this.page(byteOffset, 8);
     const view = this.getPages(page, count);
     return view.getBigUint64(offset, littleEndian);
   }
   asDataView(byteOffset: number, byteLength: number): DataView<ArrayBuffer> {
-    const {offset, page, count} = this.page(byteOffset, byteLength);
+    const { offset, page, count } = this.page(byteOffset, byteLength);
     const view = this.getPages(page, count);
     return new DataView(view.buffer, view.byteOffset + offset, byteLength);
   }
@@ -252,19 +253,19 @@ export class CXXValue implements Value, LazyObject {
   readonly location: number;
   private readonly type: TypeInfo;
   private readonly data?: number[];
-  private readonly memoryOrDataView: DataView<ArrayBuffer>|WasmMemoryView;
+  private readonly memoryOrDataView: DataView<ArrayBuffer> | WasmMemoryView;
   private readonly wasm: WasmInterface;
   private readonly typeMap: Map<unknown, TypeInfo>;
   private readonly memoryView: WasmMemoryView;
-  private membersMap?: Map<string, {location: number, type: TypeInfo}>;
+  private membersMap?: Map<string, { location: number, type: TypeInfo; }>;
   private readonly objectStore: LazyObjectStore;
   private readonly objectId: string;
-  private readonly displayValue: string|undefined;
+  private readonly displayValue: string | undefined;
   private readonly memoryAddress?: number;
 
   constructor(
-      objectStore: LazyObjectStore, wasm: WasmInterface, memoryView: WasmMemoryView, location: number, type: TypeInfo,
-      typeMap: Map<unknown, TypeInfo>, data?: number[], displayValue?: string, memoryAddress?: number) {
+    objectStore: LazyObjectStore, wasm: WasmInterface, memoryView: WasmMemoryView, location: number, type: TypeInfo,
+    typeMap: Map<unknown, TypeInfo>, data?: number[], displayValue?: string, memoryAddress?: number) {
     if (!location && !data) {
       throw new Error('Cannot represent nullptr');
     }
@@ -296,19 +297,19 @@ export class CXXValue implements Value, LazyObject {
     for (const info of typeInfo.typeInfos) {
       typeMap.set(info.typeId, info);
     }
-    const {location, root, data, displayValue, memoryAddress} = typeInfo;
+    const { location, root, data, displayValue, memoryAddress } = typeInfo;
     return new CXXValue(objectStore, wasm, memoryView, location ?? 0, root, typeMap, data, displayValue, memoryAddress);
   }
 
-  private get members(): Map<string, {location: number, type: TypeInfo}> {
+  private get members(): Map<string, { location: number, type: TypeInfo; }> {
     if (!this.membersMap) {
       this.membersMap = new Map();
       for (const member of this.type.members) {
         const memberType = this.typeMap.get(member.typeId);
         if (memberType && member.name) {
           const memberLocation = member.name === '*' ? this.memoryOrDataView.getUint32(this.location, true) :
-                                                       this.location + member.offset;
-          this.membersMap.set(member.name, {location: memberLocation, type: memberType});
+            this.location + member.offset;
+          this.membersMap.set(member.name, { location: memberLocation, type: memberType });
         }
       }
     }
@@ -322,56 +323,56 @@ export class CXXValue implements Value, LazyObject {
       throw new Error(`Incomplete type information for array or pointer type '${this.typeNames}'`);
     }
     return new CXXValue(
-        this.objectStore, this.wasm, this.memoryView, element.location + index * element.type.size, element.type,
-        this.typeMap, data);
+      this.objectStore, this.wasm, this.memoryView, element.location + index * element.type.size, element.type,
+      this.typeMap, data);
   }
 
-  async getProperties(): Promise<Array<{name: string, property: LazyObject}>> {
+  async getProperties(): Promise<Array<{ name: string, property: LazyObject; }>> {
     const properties = [];
     if (this.type.arraySize > 0) {
       for (let index = 0; index < this.type.arraySize; ++index) {
-        properties.push({name: `${index}`, property: await this.getArrayElement(index)});
+        properties.push({ name: `${index}`, property: await this.getArrayElement(index) });
       }
     } else {
       const members = await this.members;
       const data = members.has('*') ? undefined : this.data;
-      for (const [name, {location, type}] of members) {
+      for (const [name, { location, type }] of members) {
         const property = new CXXValue(this.objectStore, this.wasm, this.memoryView, location, type, this.typeMap, data);
-        properties.push({name, property});
+        properties.push({ name, property });
       }
     }
     return properties;
   }
 
-  async asRemoteObject(): Promise<Chrome.DevTools.RemoteObject|Chrome.DevTools.ForeignObject> {
+  async asRemoteObject(): Promise<Chrome.DevTools.RemoteObject | Chrome.DevTools.ForeignObject> {
     if (this.type.hasValue && this.type.arraySize === 0) {
       const formatter = CustomFormatters.get(this.type);
       if (!formatter) {
         const type = 'undefined' as Chrome.DevTools.RemoteObjectType;
         const description = '<not displayable>';
-        return {type, description, hasChildren: false};
+        return { type, description, hasChildren: false };
       }
 
       if (this.location === undefined || (!this.data && this.location === 0xffffffff)) {
         const type = 'undefined' as Chrome.DevTools.RemoteObjectType;
         const description = '<optimized out>';
-        return {type, description, hasChildren: false};
+        return { type, description, hasChildren: false };
       }
       const value =
-          new CXXValue(this.objectStore, this.wasm, this.memoryView, this.location, this.type, this.typeMap, this.data);
+        new CXXValue(this.objectStore, this.wasm, this.memoryView, this.location, this.type, this.typeMap, this.data);
 
       try {
         const formattedValue = await formatter.format(this.wasm, value);
         return await lazyObjectFromAny(
-                   formattedValue, this.objectStore, this.type, this.displayValue, this.memoryAddress)
-            .asRemoteObject();
+          formattedValue, this.objectStore, this.type, this.displayValue, this.memoryAddress)
+          .asRemoteObject();
       } catch {
         // Fallthrough
       }
     }
 
     const type = (this.type.arraySize > 0 ? 'array' : 'object') as Chrome.DevTools.RemoteObjectType;
-    const {objectId} = this;
+    const { objectId } = this;
     return {
       type,
       description: this.type.typeNames[0],
@@ -429,11 +430,11 @@ export class CXXValue implements Value, LazyObject {
         throw new RangeError('Size exceeds the buffer range');
       }
       return new DataView(
-          this.memoryOrDataView.buffer, this.memoryOrDataView.byteOffset + this.location + offset, size);
+        this.memoryOrDataView.buffer, this.memoryOrDataView.byteOffset + this.location + offset, size);
     }
     return this.memoryView.asDataView(offset, size);
   }
-  $(selector: string|number): CXXValue {
+  $(selector: string | number): CXXValue {
     const data = this.members.has('*') ? undefined : this.data;
 
     if (typeof selector === 'number') {
@@ -446,11 +447,10 @@ export class CXXValue implements Value, LazyObject {
 
     const member = this.members.get(memberName);
     if (!member) {
-      throw new Error(`Type ${this.typeNames[0] || '<anonymous>'} has no member '${
-          memberName}'. Available members are: ${Array.from(this.members.keys())}`);
+      throw new Error(`Type ${this.typeNames[0] || '<anonymous>'} has no member '${memberName}'. Available members are: ${Array.from(this.members.keys())}`);
     }
     const memberValue =
-        new CXXValue(this.objectStore, this.wasm, this.memoryView, member.location, member.type, this.typeMap, data);
+      new CXXValue(this.objectStore, this.wasm, this.memoryView, member.location, member.type, this.typeMap, data);
     if (selector.length === 0) {
       return memberValue;
     }
@@ -463,12 +463,12 @@ export class CXXValue implements Value, LazyObject {
 }
 
 export interface LazyObject {
-  getProperties(): Promise<Array<{name: string, property: LazyObject}>>;
-  asRemoteObject(): Promise<Chrome.DevTools.RemoteObject|Chrome.DevTools.ForeignObject>;
+  getProperties(): Promise<Array<{ name: string, property: LazyObject; }>>;
+  asRemoteObject(): Promise<Chrome.DevTools.RemoteObject | Chrome.DevTools.ForeignObject>;
 }
 
 export function primitiveObject<T>(
-    value: T, description?: string, linearMemoryAddress?: number, type?: TypeInfo): PrimitiveLazyObject<T>|null {
+  value: T, description?: string, linearMemoryAddress?: number, type?: TypeInfo): PrimitiveLazyObject<T> | null {
   if (['number', 'string', 'boolean', 'bigint', 'undefined'].includes(typeof value)) {
     if (typeof value === 'bigint' || typeof value === 'number') {
       const enumerator = type?.enumerators?.find(e => e.value === BigInt(value));
@@ -477,14 +477,14 @@ export function primitiveObject<T>(
       }
     }
     return new PrimitiveLazyObject(
-        typeof value as Chrome.DevTools.RemoteObjectType, value, description, linearMemoryAddress, type?.size);
+      typeof value as Chrome.DevTools.RemoteObjectType, value, description, linearMemoryAddress, type?.size);
   }
   return null;
 }
 
 function lazyObjectFromAny(
-    value: FormatterResult, objectStore: LazyObjectStore, type?: TypeInfo, description?: string,
-    linearMemoryAddress?: number): LazyObject {
+  value: FormatterResult, objectStore: LazyObjectStore, type?: TypeInfo, description?: string,
+  linearMemoryAddress?: number): LazyObject {
   const primitive = primitiveObject(value, description, linearMemoryAddress, type);
   if (primitive) {
     return primitive;
@@ -495,7 +495,7 @@ function lazyObjectFromAny(
   if (typeof value === 'object') {
     if (value === null) {
       return new PrimitiveLazyObject(
-          'null' as Chrome.DevTools.RemoteObjectType, value, description, linearMemoryAddress);
+        'null' as Chrome.DevTools.RemoteObjectType, value, description, linearMemoryAddress);
     }
     return new LocalLazyObject(value, objectStore, type, linearMemoryAddress);
   }
@@ -516,7 +516,7 @@ export class LazyObjectStore {
     return objectId;
   }
 
-  get(objectId: string): LazyObject|undefined {
+  get(objectId: string): LazyObject | undefined {
     return this.objects.get(objectId);
   }
 
@@ -536,8 +536,8 @@ export class PrimitiveLazyObject<T> implements LazyObject {
   private readonly linearMemoryAddress?: number;
   private readonly linearMemorySize?: number;
   constructor(
-      type: Chrome.DevTools.RemoteObjectType, value: T, description?: string, linearMemoryAddress?: number,
-      linearMemorySize?: number) {
+    type: Chrome.DevTools.RemoteObjectType, value: T, description?: string, linearMemoryAddress?: number,
+    linearMemorySize?: number) {
     this.type = type;
     this.value = value;
     this.description = description ?? `${value}`;
@@ -545,13 +545,13 @@ export class PrimitiveLazyObject<T> implements LazyObject {
     this.linearMemorySize = linearMemorySize;
   }
 
-  async getProperties(): Promise<Array<{name: string, property: LazyObject}>> {
+  async getProperties(): Promise<Array<{ name: string, property: LazyObject; }>> {
     return [];
   }
 
   async asRemoteObject(): Promise<Chrome.DevTools.RemoteObject> {
-    const {type, value, description, linearMemoryAddress, linearMemorySize} = this;
-    return {type, hasChildren: false, value, description, linearMemoryAddress, linearMemorySize};
+    const { type, value, description, linearMemoryAddress, linearMemorySize } = this;
+    return { type, hasChildren: false, value, description, linearMemoryAddress, linearMemorySize };
   }
 }
 
@@ -570,16 +570,16 @@ export class LocalLazyObject implements LazyObject {
     this.linearMemoryAddress = linearMemoryAddress;
   }
 
-  async getProperties(): Promise<Array<{name: string, property: LazyObject}>> {
+  async getProperties(): Promise<Array<{ name: string, property: LazyObject; }>> {
     return Object.entries(this.value).map(([name, value]) => {
       const property = lazyObjectFromAny(value, this.objectStore);
-      return {name, property};
+      return { name, property };
     });
   }
 
   async asRemoteObject(): Promise<Chrome.DevTools.RemoteObject> {
     const type = (Array.isArray(this.value) ? 'array' : 'object') as Chrome.DevTools.RemoteObjectType;
-    const {objectId, type: valueType, linearMemoryAddress} = this;
+    const { objectId, type: valueType, linearMemoryAddress } = this;
     return {
       type,
       objectId,
@@ -591,10 +591,11 @@ export class LocalLazyObject implements LazyObject {
   }
 }
 
-export type FormatterResult = number|string|boolean|bigint|undefined|CXXValue|object|(() => LazyObject);
+export type FormatterResult = number | string | boolean | bigint | undefined | CXXValue | object | (() => LazyObject);
 export type FormatterCallback = (wasm: WasmInterface, value: Value) => FormatterResult;
+
 export interface Formatter {
-  types: string[]|((t: TypeInfo) => boolean);
+  types: string[] | ((t: TypeInfo) => boolean);
   imports?: FormatterCallback[];
   format: FormatterCallback;
 }
@@ -661,7 +662,7 @@ export class CustomFormatters {
     }
   }
 
-  static get(type: TypeInfo): Formatter|null {
+  static get(type: TypeInfo): Formatter | null {
     for (const name of type.typeNames) {
       const formatter = CustomFormatters.formatters.get(name);
       if (formatter) {

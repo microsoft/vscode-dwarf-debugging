@@ -20,40 +20,6 @@ set(CXX_DEBUGGING_SOURCE_DIR ${PROJECT_SOURCE_DIR})
 
 option(CXX_DEBUGGING_USE_SANITIZERS "Enable sanitizers" OFF)
 
-# Compile typescript sources
-find_program(TS_COMPILER tsc PATHS ${DEVTOOLS_SOURCE_DIR}/node_modules/.bin REQUIRED NO_DEFAULT_PATH)
-
-set(TS_COMPILER_ARGS -p ${CMAKE_CURRENT_SOURCE_DIR} --outDir ${PROJECT_BINARY_DIR})
-exec_program(${TS_COMPILER} ${CMAKE_CURRENT_SOURCE_DIR}
-  ARGS ${TS_COMPILER_ARGS} --listFiles
-  OUTPUT_VARIABLE TS_COMPILER_INPUTS
-  RETURN_VALUE TS_COMPILER_RETVAL)
-
-if (NOT ${TS_COMPILER_RETVAL} EQUAL 0)
-  message(FATAL_ERROR "Running tsc failed:\n${TS_COMPILER_INPUTS}")
-endif()
-
-string(REPLACE "\n" ";" TS_COMPILER_INPUTS ${TS_COMPILER_INPUTS})
-
-set(TS_COMPILER_OUTPUTS)
-foreach(tsc_input IN LISTS TS_COMPILER_INPUTS)
-  get_filename_component(ext ${tsc_input} EXT)
-  if (NOT ext MATCHES ".d.ts$")
-    file(RELATIVE_PATH rel_path ${CMAKE_CURRENT_SOURCE_DIR} ${tsc_input})
-    get_filename_component(basename ${rel_path} NAME_WE)
-    get_filename_component(dirname ${rel_path} DIRECTORY)
-    list(APPEND TS_COMPILER_OUTPUTS ${CMAKE_CURRENT_BINARY_DIR}/${dirname}/${basename}.js)
-  endif()
-endforeach()
-
-add_custom_command(OUTPUT ${TS_COMPILER_OUTPUTS}
-  COMMAND ${DEVTOOLS_SOURCE_DIR}/third_party/node/node.py --output
-  ${TS_COMPILER} ${TS_COMPILER_ARGS}
-  COMMENT "Compiling Typescript"
-  DEPENDS ${TS_COMPILER_INPUTS} tsconfig.json)
-
-add_custom_target(TypescriptOutput DEPENDS ${TS_COMPILER_OUTPUTS})
-
 option(CXX_DEBUGGING_ENABLE_DWARF5 "Enable -gdwarf-5 for emitting DWARF5" OFF)
 if(CXX_DEBUGGING_ENABLE_DWARF5)
   add_compile_options(-gdwarf-5)
@@ -102,6 +68,28 @@ else()
   set(LLVM_USE_SANITIZER "")
 endif()
 
+# llvm/cmake/config-ix.cmake imports 'Platform/${CMAKE_HOST_SYSTEM_NAME}' which used to work on
+# earlier versions of CMake however newer versions does not support importing the 'Platform/${CMAKE_HOST_SYSTEM_NAME}'
+# files directly. 
+# We work around this by including a copy of the _cmake_record_install_prefix function 
+# from 'CMakeSystemSpecificInformation.cmake' here.
+function(_cmake_record_install_prefix )
+  set(_CMAKE_SYSTEM_PREFIX_PATH_INSTALL_PREFIX_VALUE "${CMAKE_INSTALL_PREFIX}" PARENT_SCOPE)
+  set(_CMAKE_SYSTEM_PREFIX_PATH_STAGING_PREFIX_VALUE "${CMAKE_STAGING_PREFIX}" PARENT_SCOPE)
+  set(icount 0)
+  set(scount 0)
+  foreach(value IN LISTS CMAKE_SYSTEM_PREFIX_PATH)
+    if(value STREQUAL CMAKE_INSTALL_PREFIX)
+      math(EXPR icount "${icount}+1")
+    endif()
+    if(value STREQUAL CMAKE_STAGING_PREFIX)
+      math(EXPR scount "${scount}+1")
+    endif()
+  endforeach()
+  set(_CMAKE_SYSTEM_PREFIX_PATH_INSTALL_PREFIX_COUNT "${icount}" PARENT_SCOPE)
+  set(_CMAKE_SYSTEM_PREFIX_PATH_STAGING_PREFIX_COUNT "${scount}" PARENT_SCOPE)
+endfunction()
+
 add_subdirectory(${THIRD_PARTY_DIR}/llvm/src/llvm ${CMAKE_CURRENT_BINARY_DIR}/third_party/llvm/src/llvm)
 set_property(DIRECTORY ${THIRD_PARTY_DIR}/llvm/src/llvm PROPERTY EXCLUDE_FROM_ALL TRUE)
 
@@ -115,25 +103,6 @@ endif()
 
 # Required to enable llvm option parsing
 include(${THIRD_PARTY_DIR}/llvm/src/llvm/cmake/modules/DetermineGCCCompatible.cmake)
-
-macro(copy_file INPUT OUTPUT)
-  get_filename_component(ABS_INPUT ${INPUT} ABSOLUTE BASE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
-  get_filename_component(ABS_OUTPUT ${OUTPUT} ABSOLUTE BASE_DIR ${CMAKE_CURRENT_BINARY_DIR})
-  add_custom_command(OUTPUT ${OUTPUT}
-    DEPENDS ${INPUT}
-    COMMAND ${CMAKE_COMMAND} -E copy ${ABS_INPUT} ${ABS_OUTPUT}
-    )
-endmacro()
-
-function(fix_sysroot TARGET)
-  if (CMAKE_SYSROOT)
-    target_link_libraries(${TARGET} PRIVATE
-      -Wl,-rpath,${CMAKE_SYSROOT}/usr/lib/x86_64-linux-gnu
-      -Wl,-rpath,${CMAKE_SYSROOT}/lib/x86_64-linux-gnu
-      -Wl,-dynamic-linker,${CMAKE_SYSROOT}/lib64/ld-linux-x86-64.so.2
-      )
-  endif()
-endfunction()
 
 set(LLVM_RUNTIME_OUTPUT_INTDIR ${LLVM_BINARY_DIR}/${CMAKE_CFG_INTDIR}/bin)
 set(LLVM_LIBRARY_OUTPUT_INTDIR ${LLVM_BINARY_DIR}/${CMAKE_CFG_INTDIR}/lib${LLVM_LIBDIR_SUFFIX})
@@ -154,12 +123,6 @@ if(CXX_DEBUGGING_USE_SPLIT_DWARF)
     add_compile_options(-gsplit-dwarf)
   endif()
 endif()
-
-fix_sysroot(lldb-tblgen)
-fix_sysroot(clang-tblgen)
-fix_sysroot(llvm-tblgen)
-fix_sysroot(llvm-mc)
-fix_sysroot(llvm-dwp)
 
 if (CXX_DEBUGGING_BUILD_WASM)
   add_subdirectory(lib)

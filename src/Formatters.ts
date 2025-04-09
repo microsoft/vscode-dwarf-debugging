@@ -10,23 +10,23 @@ import {
   type TypeInfo,
   type Value,
   type WasmInterface,
-} from './CustomFormatters.js';
-import type {ForeignObject} from './WasmTypes.js';
+} from './CustomFormatters';
+import type { ForeignObject } from './WasmTypes';
 
 /*
  * Numbers
  */
-CustomFormatters.addFormatter({types: ['bool'], format: (wasm, value) => value.asUint8() > 0});
-CustomFormatters.addFormatter({types: ['uint16_t'], format: (wasm, value) => value.asUint16()});
-CustomFormatters.addFormatter({types: ['uint32_t'], format: (wasm, value) => value.asUint32()});
-CustomFormatters.addFormatter({types: ['uint64_t'], format: (wasm, value) => value.asUint64()});
+CustomFormatters.addFormatter({ types: ['bool'], format: (wasm, value) => value.asUint8() > 0 });
+CustomFormatters.addFormatter({ types: ['uint16_t'], format: (wasm, value) => value.asUint16() });
+CustomFormatters.addFormatter({ types: ['uint32_t'], format: (wasm, value) => value.asUint32() });
+CustomFormatters.addFormatter({ types: ['uint64_t'], format: (wasm, value) => value.asUint64() });
 
-CustomFormatters.addFormatter({types: ['int16_t'], format: (wasm, value) => value.asInt16()});
-CustomFormatters.addFormatter({types: ['int32_t'], format: (wasm, value) => value.asInt32()});
-CustomFormatters.addFormatter({types: ['int64_t'], format: (wasm, value) => value.asInt64()});
+CustomFormatters.addFormatter({ types: ['int16_t'], format: (wasm, value) => value.asInt16() });
+CustomFormatters.addFormatter({ types: ['int32_t'], format: (wasm, value) => value.asInt32() });
+CustomFormatters.addFormatter({ types: ['int64_t'], format: (wasm, value) => value.asInt64() });
 
-CustomFormatters.addFormatter({types: ['float'], format: (wasm, value) => value.asFloat32()});
-CustomFormatters.addFormatter({types: ['double'], format: (wasm, value) => value.asFloat64()});
+CustomFormatters.addFormatter({ types: ['float'], format: (wasm, value) => value.asFloat32() });
+CustomFormatters.addFormatter({ types: ['double'], format: (wasm, value) => value.asFloat64() });
 
 export const enum Constants {
   MAX_STRING_LEN = (1 << 28) - 16,  // This is the maximum string len for 32bit taken from V8
@@ -37,11 +37,11 @@ export function formatVoid(): () => LazyObject {
   return () => new PrimitiveLazyObject('undefined', undefined, '<void>');
 }
 
-CustomFormatters.addFormatter({types: ['void'], format: formatVoid});
+CustomFormatters.addFormatter({ types: ['void'], format: formatVoid });
 
-CustomFormatters.addFormatter({types: ['uint8_t', 'int8_t'], format: formatChar});
+CustomFormatters.addFormatter({ types: ['uint8_t', 'int8_t'], format: formatChar });
 
-export function formatChar(wasm: WasmInterface, value: Value): string {
+export function formatChar(wasm: WasmInterface, value: Value): string | number {
   const char = value.typeNames.includes('int8_t') ? Math.abs(value.asInt8()) : value.asUint8();
   switch (char) {
     case 0x0:
@@ -60,6 +60,8 @@ export function formatChar(wasm: WasmInterface, value: Value): string {
       return '\'\\f\'';
     case 0xD:
       return '\'\\r\'';
+    case 0x27:
+      return '\'\\\'\'';
   }
   if (char < 0x20 || char > 0x7e) {
     return `'\\x${char.toString(16).padStart(2, '0')}'`;
@@ -79,15 +81,29 @@ CustomFormatters.addFormatter({
   },
 });
 
+interface FormattedStringResult<T extends InstanceType<CharArrayConstructor> = Uint8Array> {
+  size: number;
+  string: string;
+  chars: T;
+}
+
+function formattedStringResult<T extends InstanceType<CharArrayConstructor>>(chars: T, decode: (chars: T) => string): FormattedStringResult<T> {
+  return {
+    size: chars.length,
+    string: JSON.stringify(decode(chars)),
+    chars
+  };
+}
+
 /*
  * STL
  */
 function formatLibCXXString<T extends CharArrayConstructor>(
-    wasm: WasmInterface, value: Value, charType: T,
-    decode: (chars: InstanceType<T>) => string): {size: number, string: string} {
+  wasm: WasmInterface, value: Value, charType: T,
+  decode: (chars: InstanceType<T>) => string): FormattedStringResult<InstanceType<T>> {
   const shortString = value.$('__r_.__value_.<union>.__s');
   const size = shortString.getMembers().includes('<union>') ? shortString.$('<union>.__size_').asUint8() :
-                                                              shortString.$('__size_').asUint8();
+    shortString.$('__size_').asUint8();
   const isLong = 0 < (size & 0x80);
   const charSize = charType.BYTES_PER_ELEMENT;
   if (isLong) {
@@ -98,26 +114,26 @@ function formatLibCXXString<T extends CharArrayConstructor>(
     const copyLen = Math.min(stringSize * charSize, Constants.MAX_STRING_LEN);
     const bytes = wasm.readMemory(data, copyLen);
     const text = new charType(bytes.buffer, bytes.byteOffset, stringSize) as InstanceType<T>;
-    return {size: stringSize, string: decode(text)};
+    return formattedStringResult(text, decode);
   }
 
   const bytes = shortString.$('__data_').asDataView(0, size * charSize);
   const text = new charType(bytes.buffer, bytes.byteOffset, size) as InstanceType<T>;
-  return {size, string: decode(text)};
+  return formattedStringResult(text, decode);
 }
 
-export function formatLibCXX8String(wasm: WasmInterface, value: Value): {size: number, string: string} {
+export function formatLibCXX8String(wasm: WasmInterface, value: Value): FormattedStringResult {
   return formatLibCXXString(wasm, value, Uint8Array, str => new TextDecoder().decode(str));
 }
 
-export function formatLibCXX16String(wasm: WasmInterface, value: Value): {size: number, string: string} {
+export function formatLibCXX16String(wasm: WasmInterface, value: Value): FormattedStringResult<Uint16Array> {
   return formatLibCXXString(wasm, value, Uint16Array, str => new TextDecoder('utf-16le').decode(str));
 }
 
-export function formatLibCXX32String(wasm: WasmInterface, value: Value): {size: number, string: string} {
+export function formatLibCXX32String(wasm: WasmInterface, value: Value): FormattedStringResult<Uint32Array> {
   // emscripten's wchar is 4 byte
   return formatLibCXXString(
-      wasm, value, Uint32Array, str => Array.from(str).map(v => String.fromCodePoint(v)).join(''));
+    wasm, value, Uint32Array, str => Array.from(str).map(v => String.fromCodePoint(v)).join(''));
 }
 
 CustomFormatters.addFormatter({
@@ -148,13 +164,11 @@ CustomFormatters.addFormatter({
   format: formatLibCXX32String,
 });
 
-type CharArrayConstructor = Uint8ArrayConstructor|Uint16ArrayConstructor|Uint32ArrayConstructor;
+type CharArrayConstructor = Uint8ArrayConstructor | Uint16ArrayConstructor | Uint32ArrayConstructor;
 
 function formatRawString<T extends CharArrayConstructor>(
-    wasm: WasmInterface, value: Value, charType: T, decode: (chars: InstanceType<T>) => string): string|{
-  [key: string]: Value|null,
-}
-{
+  wasm: WasmInterface, value: Value, charType: T, decode: (chars: InstanceType<T>) => string):
+  FormattedStringResult<InstanceType<T>> | { [key: string]: Value | null; } {
   const address = value.asUint32();
   if (address < Constants.SAFE_HEAP_START) {
     return formatPointerOrReference(wasm, value);
@@ -173,44 +187,40 @@ function formatRawString<T extends CharArrayConstructor>(
       const str = new charType(bufferSize / charSize + strlen) as InstanceType<T>;
       for (let i = 0; i < slices.length; ++i) {
         str.set(
-            // @ts-expect-error TypeScript can't find the deduce the intersection type correctly
-            new charType(slices[i].buffer, slices[i].byteOffset, slices[i].byteLength / charSize),
-            i * Constants.PAGE_SIZE / charSize);
+          new charType(slices[i].buffer, slices[i].byteOffset, slices[i].byteLength / charSize),
+          i * Constants.PAGE_SIZE / charSize);
       }
       str.set(substr.subarray(0, strlen), bufferSize / charSize);
-      return decode(str);
+      return formattedStringResult(str, decode);
     }
     slices.push(buffer);
   }
   return formatPointerOrReference(wasm, value);
 }
 
-export function formatCString(wasm: WasmInterface, value: Value): string|{
-  [key: string]: Value|null,
-}
-{
+export function formatCString(wasm: WasmInterface, value: Value): FormattedStringResult | {
+  [key: string]: Value | null,
+} {
   return formatRawString(wasm, value, Uint8Array, str => new TextDecoder().decode(str));
 }
 
-export function formatU16CString(wasm: WasmInterface, value: Value): string|{
-  [key: string]: Value|null,
-}
-{
+export function formatU16CString(wasm: WasmInterface, value: Value): FormattedStringResult<Uint16Array> | {
+  [key: string]: Value | null,
+} {
   return formatRawString(wasm, value, Uint16Array, str => new TextDecoder('utf-16le').decode(str));
 }
 
-export function formatCWString(wasm: WasmInterface, value: Value): string|{
-  [key: string]: Value|null,
-}
-{
+export function formatCWString(wasm: WasmInterface, value: Value): FormattedStringResult<Uint32Array> | {
+  [key: string]: Value | null,
+} {
   // emscripten's wchar is 4 byte
   return formatRawString(wasm, value, Uint32Array, str => Array.from(str).map(v => String.fromCodePoint(v)).join(''));
 }
 
 // Register with higher precedence than the generic pointer handler.
-CustomFormatters.addFormatter({types: ['char *', 'char8_t *'], format: formatCString});
-CustomFormatters.addFormatter({types: ['char16_t *'], format: formatU16CString});
-CustomFormatters.addFormatter({types: ['wchar_t *', 'char32_t *'], format: formatCWString});
+CustomFormatters.addFormatter({ types: ['char *', 'char8_t *'], format: formatCString });
+CustomFormatters.addFormatter({ types: ['char16_t *'], format: formatU16CString });
+CustomFormatters.addFormatter({ types: ['wchar_t *', 'char32_t *'], format: formatCWString });
 
 export function formatVector(wasm: WasmInterface, value: Value): Value[] {
   const begin = value.$('__begin_');
@@ -246,46 +256,46 @@ function reMatch(...exprs: RegExp[]): (type: TypeInfo) => boolean {
   };
 }
 
-CustomFormatters.addFormatter({types: reMatch(/^std::vector<.+>$/), format: formatVector});
+CustomFormatters.addFormatter({ types: reMatch(/^std::vector<.+>$/), format: formatVector });
 
-export function formatPointerOrReference(wasm: WasmInterface, value: Value): {[key: string]: Value|null} {
+export function formatPointerOrReference(wasm: WasmInterface, value: Value): { [key: string]: Value | null; } {
   const address = value.asUint32();
   if (address === 0) {
-    return {'0x0': null};
+    return { '0x0': null };
   }
-  return {[`0x${address.toString(16)}`]: value.$('*')};
+  return { [`0x${address.toString(16)}`]: value.$('*') };
 }
-CustomFormatters.addFormatter({types: type => type.isPointer, format: formatPointerOrReference});
+CustomFormatters.addFormatter({ types: type => type.isPointer, format: formatPointerOrReference });
 
-export function formatDynamicArray(wasm: WasmInterface, value: Value): {[key: string]: Value|null} {
-  return {[`0x${value.location.toString(16)}`]: value.$(0)};
+export function formatDynamicArray(wasm: WasmInterface, value: Value): { [key: string]: Value | null; } {
+  return { [`0x${value.location.toString(16)}`]: value.$(0) };
 }
-CustomFormatters.addFormatter({types: reMatch(/^.+\[\]$/), format: formatDynamicArray});
+CustomFormatters.addFormatter({ types: reMatch(/^.+\[\]$/), format: formatDynamicArray });
 
 export function formatUInt128(wasm: WasmInterface, value: Value): bigint {
   const view = value.asDataView();
   return (view.getBigUint64(8, true) << BigInt(64)) + (view.getBigUint64(0, true));
 }
-CustomFormatters.addFormatter({types: ['unsigned __int128'], format: formatUInt128});
+CustomFormatters.addFormatter({ types: ['unsigned __int128'], format: formatUInt128 });
 
 export function formatInt128(wasm: WasmInterface, value: Value): bigint {
   const view = value.asDataView();
   return (view.getBigInt64(8, true) << BigInt(64)) | (view.getBigUint64(0, true));
 }
-CustomFormatters.addFormatter({types: ['__int128'], format: formatInt128});
+CustomFormatters.addFormatter({ types: ['__int128'], format: formatInt128 });
 
 export function formatExternRef(wasm: WasmInterface, value: Value): () => LazyObject {
   const obj = {
-    async getProperties(): Promise<Array<{name: string, property: LazyObject}>> {
+    async getProperties(): Promise<Array<{ name: string, property: LazyObject; }>> {
       return [];
     },
     async asRemoteObject(): Promise<ForeignObject> {
       const encodedValue = value.asUint64();
       const ValueClasses: ['global', 'local', 'operand'] = ['global', 'local', 'operand'];
       const valueClass = ValueClasses[Number(encodedValue >> 32n)];
-      return {type: 'reftype', valueClass, index: Number(BigInt.asUintN(32, encodedValue))};
+      return { type: 'reftype', valueClass, index: Number(BigInt.asUintN(32, encodedValue)) };
     }
   };
   return () => obj;
 }
-CustomFormatters.addFormatter({types: ['__externref_t', 'externref_t'], format: formatExternRef});
+CustomFormatters.addFormatter({ types: ['__externref_t', 'externref_t'], format: formatExternRef });

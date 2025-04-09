@@ -28,11 +28,8 @@ extends:
           - script: npm ci
             displayName: Install dependencies
 
-          - script: npm run build-native-ext-image
+          - script: npm run build
             displayName: Build CXX extension
-
-          - script: npm run copy-out-native-ext
-            displayName: Copy out extension
 
           - script: npm run test
             displayName: Test

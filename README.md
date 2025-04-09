@@ -5,7 +5,7 @@ This repository publishes an npm module which is used by [js-debug](https://gith
 - For VS Code users, you will be prompted to install the appropriate extension that contains this module when you first step into a WebAssembly file.
 - For users of the js-debug standalone DAP server, you can install the `@vscode/dwarf-debugging` alongside js-debug or somewhere in your [NODE_PATH](https://nodejs.org/api/modules.html#loading-from-the-global-folders).
 
-This project works by compiling the Chrome [C/C++ Debugging Extension](https://github.com/ChromeDevTools/devtools-frontend/tree/main/extensions/cxx_debugging) in a way that is usable by Node.js programs. Fortunately, the extension is architected such that most work is done inside a WebWorker, and making this instead run in a Node worker_thread is not terribly difficult. Appropriate TypeScript types are exposed, and this module is then shimmed into js-debug which 'pretends' to be Devtools.
+This project works by compiling the WebAssembly backend for the Chrome [C/C++ Debugging Extension](https://github.com/ChromeDevTools/devtools-frontend/tree/main/extensions/cxx_debugging) in a way that is usable by Node.js programs. Fortunately, the extension is architected such that most work is done inside a WebWorker, and porting the TypeScript code to instead run in a Node worker_thread is not terribly difficult. Appropriate TypeScript types are exposed, and this module is then shimmed into js-debug which 'pretends' to be Devtools.
 
 ## Contributing
 

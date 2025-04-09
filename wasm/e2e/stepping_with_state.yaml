@@ -4,10 +4,10 @@
 # https://github.com/ChromeDevTools/devtools-frontend/blob/main/extensions/cxx_debugging/e2e/tests/stepping_with_state.yaml
 
 name: Stepping with state
-source_file: //extensions/cxx_debugging/e2e/resources/stepping-with-state.c
+source_file: resources/stepping-with-state.c
 flags: [
   [-g, -fdebug-compilation-dir=., -fno-limit-debug-info, -sWASM_BIGINT, -sERROR_ON_WASM_CHANGES_AFTER_LINK],
-  [-g, -fdebug-compilation-dir=., -fno-limit-debug-info,  -sWASM_BIGINT, -sERROR_ON_WASM_CHANGES_AFTER_LINK, -gsplit-dwarf],
+  [-g, -fdebug-compilation-dir=., -fno-limit-debug-info, -sWASM_BIGINT, -sERROR_ON_WASM_CHANGES_AFTER_LINK, -gsplit-dwarf],
   [-g, -fdebug-compilation-dir=., -gdwarf-5, -sWASM_BIGINT, -sERROR_ON_WASM_CHANGES_AFTER_LINK],
   [-g, -fdebug-compilation-dir=., -gdwarf-5, -sWASM_BIGINT, -sERROR_ON_WASM_CHANGES_AFTER_LINK, -gsplit-dwarf, -gpubnames]]
 script:
@@ -22,7 +22,7 @@ script:
     variables:
       - name: Local.n
         value: 10
-      - name: Local.x
+      - name: Local.x.$0
         value: 0
     actions:
       - action: step_over
@@ -32,7 +32,7 @@ script:
     variables:
       - name: Local.n
         value: 10
-      - name: Local.x
+      - name: Local.x.$0
         value: 0
     actions:
       - action: remove_breakpoint
@@ -46,7 +46,7 @@ script:
     variables:
       - name: Local.n
         value: 10
-      - name: Local.x
+      - name: Local.x.$0
         value: 0
     actions:
       - action: step_over
@@ -56,7 +56,7 @@ script:
     variables:
       - name: Local.n
         value: 10
-      - name: Local.x
+      - name: Local.x.$0
         value: 0
       - name: Local.i
         value: 0

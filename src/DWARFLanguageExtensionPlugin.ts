@@ -3,20 +3,15 @@
 //
 // https://github.com/ChromeDevTools/devtools-frontend/blob/main/extensions/cxx_debugging/src/DWARFSymbols.ts
 
-import './Formatters.js';
+import './Formatters';
 
-import type {Chrome} from '../../../extension-api/ExtensionAPI.js';
+import type { Chrome } from './ExtensionAPI';
 
-import * as Formatters from './CustomFormatters.js';
-import {
-  DEFAULT_MODULE_CONFIGURATIONS,
-  findModuleConfiguration,
-  type ModuleConfigurations,
-  resolveSourcePathToURL,
-} from './ModuleConfiguration.js';
-import type * as SymbolsBackend from './SymbolsBackend.js';
-import createSymbolsBackend from './SymbolsBackend.js';
-import type {HostInterface} from './WorkerRPC.js';
+import * as Formatters from './CustomFormatters';
+import { resolveSourcePathToURL } from './PathUtils';
+import type * as SymbolsBackend from './SymbolsBackend';
+import createSymbolsBackend from './SymbolsBackend';
+import type { HostInterface } from './WorkerRPC';
 
 function mapVector<T, ApiT>(vector: SymbolsBackend.Vector<ApiT>, callback: (apiElement: ApiT) => T): T[] {
   const elements: T[] = [];
@@ -28,19 +23,19 @@ function mapVector<T, ApiT>(vector: SymbolsBackend.Vector<ApiT>, callback: (apiE
 }
 
 interface ScopeInfo {
-  type: 'GLOBAL'|'LOCAL'|'PARAMETER';
+  type: 'GLOBAL' | 'LOCAL' | 'PARAMETER';
   typeName: string;
   icon?: string;
 }
 
-type LazyFSNode = FS.FSNode&{contents: {cacheLength: () => void, length: number}};
+type LazyFSNode = FS.FSNode & { contents: { cacheLength: () => void, length: number; }; };
 
 function mapEnumerator(apiEnumerator: SymbolsBackend.Enumerator): Formatters.Enumerator {
-  return {typeId: apiEnumerator.typeId, value: apiEnumerator.value, name: apiEnumerator.name};
+  return { typeId: apiEnumerator.typeId, value: apiEnumerator.value, name: apiEnumerator.name };
 }
 
 function mapFieldInfo(apiFieldInfo: SymbolsBackend.FieldInfo): Formatters.FieldInfo {
-  return {typeId: apiFieldInfo.typeId, offset: apiFieldInfo.offset, name: apiFieldInfo.name};
+  return { typeId: apiFieldInfo.typeId, offset: apiFieldInfo.offset, name: apiFieldInfo.name };
 }
 
 class ModuleInfo {
@@ -49,14 +44,14 @@ class ModuleInfo {
   readonly dwarfSymbolsPlugin: SymbolsBackend.DWARFSymbolsPlugin;
 
   constructor(
-      readonly symbolsUrl: string, readonly symbolsFileName: string, readonly symbolsDwpFileName: string|undefined,
-      readonly backend: SymbolsBackend.Module) {
+    readonly symbolsUrl: string, readonly symbolsFileName: string, readonly symbolsDwpFileName: string | undefined,
+    readonly backend: SymbolsBackend.Module) {
     this.fileNameToUrl = new Map<string, string>();
     this.urlToFileName = new Map<string, string>();
     this.dwarfSymbolsPlugin = new backend.DWARFSymbolsPlugin();
   }
 
-  stringifyScope(scope: SymbolsBackend.VariableScope): 'GLOBAL'|'LOCAL'|'PARAMETER' {
+  stringifyScope(scope: SymbolsBackend.VariableScope): 'GLOBAL' | 'LOCAL' | 'PARAMETER' {
     switch (scope) {
       case this.backend.VariableScope.GLOBAL:
         return 'GLOBAL';
@@ -83,9 +78,9 @@ class ModuleInfo {
   }
 }
 
-export function createEmbindPool(): {
+function createEmbindPool(): {
   flush(): void,
-  manage<T extends SymbolsBackend.EmbindObject|undefined>(object: T): T,
+  manage<T extends SymbolsBackend.EmbindObject | undefined>(object: T): T,
   unmanage<T extends SymbolsBackend.EmbindObject>(object: T): boolean,
 } {
   class EmbindObjectPool {
@@ -98,7 +93,7 @@ export function createEmbindPool(): {
       this.objectPool = [];
     }
 
-    manage<T extends SymbolsBackend.EmbindObject|undefined>(object: T): T {
+    manage<T extends SymbolsBackend.EmbindObject | undefined>(object: T): T {
       if (typeof object !== 'undefined') {
         this.objectPool.push(object);
       }
@@ -120,79 +115,79 @@ export function createEmbindPool(): {
   const manage = pool.manage.bind(pool);
   const unmanage = pool.unmanage.bind(pool);
   const flush = pool.flush.bind(pool);
-  return {manage, unmanage, flush};
+  return { manage, unmanage, flush };
 }
 
 // Cache the underlying WebAssembly module after the first instantiation
 // so that subsequent calls to `createSymbolsBackend()` are faster, which
 // greatly speeds up the test suite.
-let symbolsBackendModulePromise: undefined|Promise<WebAssembly.Module>;
+let symbolsBackendModulePromise: undefined | Promise<WebAssembly.Module>;
 function instantiateWasm(
-    imports: WebAssembly.Imports,
-    callback: (module: WebAssembly.Module) => void,
-    resourceLoader: ResourceLoader,
-    ): Emscripten.WebAssemblyExports {
+  imports: WebAssembly.Imports,
+  callback: (module: WebAssembly.Module) => void,
+  resourceLoader: ResourceLoader,
+): Emscripten.WebAssemblyExports {
   if (!symbolsBackendModulePromise) {
     symbolsBackendModulePromise = resourceLoader.createSymbolsBackendModulePromise();
   }
   symbolsBackendModulePromise.then(module => WebAssembly.instantiate(module, imports))
-      .then(callback)
-      .catch(console.error);
+    .then(callback)
+    .catch(console.error);
   return [];
 }
 
-export type RawModule = Chrome.DevTools.RawModule&{dwp?: ArrayBuffer};
+export type RawModule = Chrome.DevTools.RawModule & { dwp?: ArrayBuffer; };
 
 export interface ResourceLoader {
   loadSymbols(rawModuleId: string, rawModule: RawModule, url: URL, filesystem: typeof FS, hostInterface: HostInterface):
-      Promise<{symbolsFileName: string, symbolsDwpFileName?: string}>;
+    Promise<{ symbolsFileName: string, symbolsDwpFileName?: string; }>;
   createSymbolsBackendModulePromise(): Promise<WebAssembly.Module>;
   possiblyMissingSymbols?: string[];
 }
 
 export class DWARFLanguageExtensionPlugin implements Chrome.DevTools.LanguageExtensionPlugin {
-  private moduleInfos = new Map<string, Promise<ModuleInfo|undefined>>();
+  private moduleInfos = new Map<string, Promise<ModuleInfo | undefined>>();
   private lazyObjects = new Formatters.LazyObjectStore();
 
-  constructor(
-      readonly moduleConfigurations: ModuleConfigurations, readonly resourceLoader: ResourceLoader,
-      readonly hostInterface: HostInterface) {
-    this.moduleConfigurations = moduleConfigurations;
-  }
+  constructor(readonly resourceLoader: ResourceLoader, readonly hostInterface: HostInterface) { }
 
   private async newModuleInfo(rawModuleId: string, symbolsHint: string, rawModule: RawModule): Promise<ModuleInfo> {
-    const {flush, manage} = createEmbindPool();
+    const { flush, manage } = createEmbindPool();
     try {
       const rawModuleURL = new URL(rawModule.url);
-      const {pathSubstitutions} = findModuleConfiguration(this.moduleConfigurations, rawModuleURL);
-      const symbolsURL = symbolsHint ? resolveSourcePathToURL([], symbolsHint, rawModuleURL) : rawModuleURL;
+      const symbolsURL = symbolsHint ? resolveSourcePathToURL(symbolsHint, rawModuleURL) : rawModuleURL;
 
       const instantiateWasmWrapper =
-          (imports: Emscripten.WebAssemblyImports,
-           callback: (module: WebAssembly.Module) => void): Emscripten.WebAssemblyExports => {
-            // Emscripten type definitions are incorrect, we're getting passed a WebAssembly.Imports object here.
-            return instantiateWasm(imports as unknown as WebAssembly.Imports, callback, this.resourceLoader);
-          };
-      const backend = await createSymbolsBackend({instantiateWasm: instantiateWasmWrapper});
-      const {symbolsFileName, symbolsDwpFileName} =
-          await this.resourceLoader.loadSymbols(rawModuleId, rawModule, symbolsURL, backend.FS, this.hostInterface);
+        (imports: Emscripten.WebAssemblyImports,
+          callback: (module: WebAssembly.Module) => void): Emscripten.WebAssemblyExports => {
+          // Emscripten type definitions are incorrect, we're getting passed a WebAssembly.Imports object here.
+          return instantiateWasm(imports as unknown as WebAssembly.Imports, callback, this.resourceLoader);
+        };
+      const backend = await createSymbolsBackend({ instantiateWasm: instantiateWasmWrapper });
+      const { symbolsFileName, symbolsDwpFileName } =
+        await this.resourceLoader.loadSymbols(rawModuleId, rawModule, symbolsURL, backend.FS, this.hostInterface);
       const moduleInfo = new ModuleInfo(symbolsURL.href, symbolsFileName, symbolsDwpFileName, backend);
 
       const addRawModuleResponse = manage(moduleInfo.dwarfSymbolsPlugin.AddRawModule(rawModuleId, symbolsFileName));
       mapVector(manage(addRawModuleResponse.sources), fileName => {
-        const fileURL = resolveSourcePathToURL(pathSubstitutions, fileName, symbolsURL);
+        const fileURL = resolveSourcePathToURL(fileName, symbolsURL);
         moduleInfo.fileNameToUrl.set(fileName, fileURL.href);
         moduleInfo.urlToFileName.set(fileURL.href, fileName);
       });
 
-      // Set up lazy dwo files if we are running on a worker
-      if (typeof global === 'undefined' && typeof importScripts === 'function' &&
-          typeof XMLHttpRequest !== 'undefined') {
-        mapVector(manage(addRawModuleResponse.dwos), dwoFile => {
-          const absolutePath = dwoFile.startsWith('/') ? dwoFile : '/' + dwoFile;
-          const pathSplit = absolutePath.split('/');
-          const fileName = pathSplit.pop() as string;
-          const parentDirectory = pathSplit.join('/');
+      for (const dwoFile of mapVector(manage(addRawModuleResponse.dwos), dwo => dwo)) {
+        const absolutePath = dwoFile.startsWith('/') ? dwoFile : '/' + dwoFile;
+        const pathSplit = absolutePath.split('/');
+        const fileName = pathSplit.pop() as string;
+        const parentDirectory = pathSplit.join('/');
+
+        const dwoURL = new URL(dwoFile, symbolsURL).href;
+        const dwoResponse = await fetch(dwoURL, { mode: 'no-cors' })
+          .catch((e: Error) => ({ ok: false, status: -1, statusText: e.message } as const));
+
+        if (dwoResponse.ok) {
+          const dwoData = await dwoResponse.arrayBuffer();
+          void this.hostInterface.reportResourceLoad(dwoURL, { success: true, size: dwoData.byteLength });
 
           // Sometimes these stick around.
           try {
@@ -206,23 +201,18 @@ export class DWARFLanguageExtensionPlugin implements Chrome.DevTools.LanguageExt
             backend.FS.createPath('/', parentDirectory.substring(1), true, true);
           }
 
-          const dwoURL = new URL(dwoFile, symbolsURL).href;
-          const node = backend.FS.createLazyFile(parentDirectory, fileName, dwoURL, true, false) as LazyFSNode;
-          const cacheLength = node.contents.cacheLength;
-          const wrapper = (): void => {
-            try {
-              cacheLength.apply(node.contents);
-              void this.hostInterface.reportResourceLoad(dwoURL, {success: true, size: node.contents.length});
-            } catch (e) {
-              void this.hostInterface.reportResourceLoad(dwoURL, {success: false, errorMessage: (e as Error).message});
-              // Rethrow any error fetching the content as errno 44 (EEXIST)
-              // TypeScript doesn't know about the ErrnoError constructor
-              // @ts-expect-error doesn't exit on types
-              throw new backend.FS.ErrnoError(44);
-            }
-          };
-          node.contents.cacheLength = wrapper;
-        });
+          backend.FS.createDataFile(
+            parentDirectory,
+            fileName,
+            new Uint8Array(dwoData),
+            true /* canRead */,
+            false /* canWrite */,
+            true /* canOwn */,
+          );
+        } else {
+          const dwoError = dwoResponse.statusText || `status code ${dwoResponse.status}`;
+          void this.hostInterface.reportResourceLoad(dwoURL, { success: false, errorMessage: `Failed to fetch dwo file: ${dwoError}` });
+        }
       }
 
       return moduleInfo;
@@ -275,8 +265,8 @@ export class DWARFLanguageExtensionPlugin implements Chrome.DevTools.LanguageExt
   }
 
   async sourceLocationToRawLocation(sourceLocation: Chrome.DevTools.SourceLocation):
-      Promise<Chrome.DevTools.RawLocationRange[]> {
-    const {flush, manage} = createEmbindPool();
+    Promise<Chrome.DevTools.RawLocationRange[]> {
+    const { flush, manage } = createEmbindPool();
     const moduleInfo = await this.getModuleInfo(sourceLocation.rawModuleId);
     const sourceFile = moduleInfo.urlToFileName.get(sourceLocation.sourceFileURL);
     if (!sourceFile) {
@@ -284,14 +274,14 @@ export class DWARFLanguageExtensionPlugin implements Chrome.DevTools.LanguageExt
     }
     try {
       const rawLocations = manage(moduleInfo.dwarfSymbolsPlugin.SourceLocationToRawLocation(
-          sourceLocation.rawModuleId, sourceFile, sourceLocation.lineNumber, sourceLocation.columnNumber));
+        sourceLocation.rawModuleId, sourceFile, sourceLocation.lineNumber, sourceLocation.columnNumber));
       const error = manage(rawLocations.error);
       if (error) {
         throw new Error(`${moduleInfo.stringifyErrorCode(error.code)}: ${error.message}`);
       }
       const locations = mapVector(manage(rawLocations.rawLocationRanges), rawLocation => {
-        const {rawModuleId, startOffset, endOffset} = manage(rawLocation);
-        return {rawModuleId, startOffset, endOffset};
+        const { rawModuleId, startOffset, endOffset } = manage(rawLocation);
+        return { rawModuleId, startOffset, endOffset };
       });
       return locations;
     } finally {
@@ -300,12 +290,12 @@ export class DWARFLanguageExtensionPlugin implements Chrome.DevTools.LanguageExt
   }
 
   async rawLocationToSourceLocation(rawLocation: Chrome.DevTools.RawLocation):
-      Promise<Chrome.DevTools.SourceLocation[]> {
-    const {flush, manage} = createEmbindPool();
+    Promise<Chrome.DevTools.SourceLocation[]> {
+    const { flush, manage } = createEmbindPool();
     const moduleInfo = await this.getModuleInfo(rawLocation.rawModuleId);
     try {
       const sourceLocations = moduleInfo.dwarfSymbolsPlugin.RawLocationToSourceLocation(
-          rawLocation.rawModuleId, rawLocation.codeOffset, rawLocation.inlineFrameIndex || 0);
+        rawLocation.rawModuleId, rawLocation.codeOffset, rawLocation.inlineFrameIndex || 0);
       const error = manage(sourceLocations.error);
       if (error) {
         throw new Error(`${moduleInfo.stringifyErrorCode(error.code)}: ${error.message}`);
@@ -315,7 +305,7 @@ export class DWARFLanguageExtensionPlugin implements Chrome.DevTools.LanguageExt
         if (!sourceFileURL) {
           throw new Error(`InternalError: Unknown source file ${sourceLocation.sourceFile}`);
         }
-        const {rawModuleId, lineNumber, columnNumber} = manage(sourceLocation);
+        const { rawModuleId, lineNumber, columnNumber } = manage(sourceLocation);
         return {
           rawModuleId,
           sourceFileURL,
@@ -354,18 +344,18 @@ export class DWARFLanguageExtensionPlugin implements Chrome.DevTools.LanguageExt
   }
 
   async listVariablesInScope(rawLocation: Chrome.DevTools.RawLocation): Promise<Chrome.DevTools.Variable[]> {
-    const {flush, manage} = createEmbindPool();
+    const { flush, manage } = createEmbindPool();
     const moduleInfo = await this.getModuleInfo(rawLocation.rawModuleId);
     try {
       const variables = manage(moduleInfo.dwarfSymbolsPlugin.ListVariablesInScope(
-          rawLocation.rawModuleId, rawLocation.codeOffset, rawLocation.inlineFrameIndex || 0));
+        rawLocation.rawModuleId, rawLocation.codeOffset, rawLocation.inlineFrameIndex || 0));
       const error = manage(variables.error);
       if (error) {
         throw new Error(`${moduleInfo.stringifyErrorCode(error.code)}: ${error.message}`);
       }
       const apiVariables = mapVector(manage(variables.variable), variable => {
-        const {scope, name, type} = manage(variable);
-        return {scope: moduleInfo.stringifyScope(scope), name, type, nestedName: name.split('::')};
+        const { scope, name, type } = manage(variable);
+        return { scope: moduleInfo.stringifyScope(scope), name, type, nestedName: name.split('::') };
       });
       return apiVariables;
     } finally {
@@ -374,18 +364,18 @@ export class DWARFLanguageExtensionPlugin implements Chrome.DevTools.LanguageExt
   }
 
   async getFunctionInfo(rawLocation: Chrome.DevTools.RawLocation):
-      Promise<{frames: Chrome.DevTools.FunctionInfo[], missingSymbolFiles: string[]}> {
-    const {flush, manage} = createEmbindPool();
+    Promise<{ frames: Chrome.DevTools.FunctionInfo[], missingSymbolFiles: string[]; }> {
+    const { flush, manage } = createEmbindPool();
     const moduleInfo = await this.getModuleInfo(rawLocation.rawModuleId);
     try {
       const functionInfo =
-          manage(moduleInfo.dwarfSymbolsPlugin.GetFunctionInfo(rawLocation.rawModuleId, rawLocation.codeOffset));
+        manage(moduleInfo.dwarfSymbolsPlugin.GetFunctionInfo(rawLocation.rawModuleId, rawLocation.codeOffset));
       const error = manage(functionInfo.error);
       if (error) {
         throw new Error(`${moduleInfo.stringifyErrorCode(error.code)}: ${error.message}`);
       }
       const apiFunctionInfos = mapVector(manage(functionInfo.functionNames), functionName => {
-        return {name: functionName};
+        return { name: functionName };
       });
       let apiMissingSymbolFiles = mapVector(manage(functionInfo.missingSymbolFiles), x => x);
       if (apiMissingSymbolFiles.length && this.resourceLoader.possiblyMissingSymbols) {
@@ -402,19 +392,19 @@ export class DWARFLanguageExtensionPlugin implements Chrome.DevTools.LanguageExt
   }
 
   async getInlinedFunctionRanges(rawLocation: Chrome.DevTools.RawLocation):
-      Promise<Chrome.DevTools.RawLocationRange[]> {
-    const {flush, manage} = createEmbindPool();
+    Promise<Chrome.DevTools.RawLocationRange[]> {
+    const { flush, manage } = createEmbindPool();
     const moduleInfo = await this.getModuleInfo(rawLocation.rawModuleId);
     try {
       const rawLocations = manage(
-          moduleInfo.dwarfSymbolsPlugin.GetInlinedFunctionRanges(rawLocation.rawModuleId, rawLocation.codeOffset));
+        moduleInfo.dwarfSymbolsPlugin.GetInlinedFunctionRanges(rawLocation.rawModuleId, rawLocation.codeOffset));
       const error = manage(rawLocations.error);
       if (error) {
         throw new Error(`${moduleInfo.stringifyErrorCode(error.code)}: ${error.message}`);
       }
       const locations = mapVector(manage(rawLocations.rawLocationRanges), rawLocation => {
-        const {rawModuleId, startOffset, endOffset} = manage(rawLocation);
-        return {rawModuleId, startOffset, endOffset};
+        const { rawModuleId, startOffset, endOffset } = manage(rawLocation);
+        return { rawModuleId, startOffset, endOffset };
       });
       return locations;
     } finally {
@@ -423,18 +413,18 @@ export class DWARFLanguageExtensionPlugin implements Chrome.DevTools.LanguageExt
   }
 
   async getInlinedCalleesRanges(rawLocation: Chrome.DevTools.RawLocation): Promise<Chrome.DevTools.RawLocationRange[]> {
-    const {flush, manage} = createEmbindPool();
+    const { flush, manage } = createEmbindPool();
     const moduleInfo = await this.getModuleInfo(rawLocation.rawModuleId);
     try {
       const rawLocations = manage(
-          moduleInfo.dwarfSymbolsPlugin.GetInlinedCalleesRanges(rawLocation.rawModuleId, rawLocation.codeOffset));
+        moduleInfo.dwarfSymbolsPlugin.GetInlinedCalleesRanges(rawLocation.rawModuleId, rawLocation.codeOffset));
       const error = manage(rawLocations.error);
       if (error) {
         throw new Error(`${moduleInfo.stringifyErrorCode(error.code)}: ${error.message}`);
       }
       const locations = mapVector(manage(rawLocations.rawLocationRanges), rawLocation => {
-        const {rawModuleId, startOffset, endOffset} = manage(rawLocation);
-        return {rawModuleId, startOffset, endOffset};
+        const { rawModuleId, startOffset, endOffset } = manage(rawLocation);
+        return { rawModuleId, startOffset, endOffset };
       });
       return locations;
     } finally {
@@ -449,8 +439,8 @@ export class DWARFLanguageExtensionPlugin implements Chrome.DevTools.LanguageExt
     data?: number[],
     displayValue?: string,
     memoryAddress?: number,
-  }|null> {
-    const {manage, unmanage, flush} = createEmbindPool();
+  } | null> {
+    const { manage, unmanage, flush } = createEmbindPool();
     const moduleInfo = await this.getModuleInfo(context.rawModuleId);
     try {
       const apiRawLocation = manage(new moduleInfo.backend.RawLocation());
@@ -461,7 +451,7 @@ export class DWARFLanguageExtensionPlugin implements Chrome.DevTools.LanguageExt
       const wasm = new Formatters.HostWasmInterface(this.hostInterface, stopId);
       const proxy = new Formatters.DebuggerProxy(wasm, moduleInfo.backend);
       const typeInfoResult =
-          manage(moduleInfo.dwarfSymbolsPlugin.EvaluateExpression(apiRawLocation, expression, proxy));
+        manage(moduleInfo.dwarfSymbolsPlugin.EvaluateExpression(apiRawLocation, expression, proxy));
       const error = manage(typeInfoResult.error);
       if (error) {
         if (error.code === moduleInfo.backend.ErrorCode.MODULE_NOT_FOUND_ERROR) {
@@ -478,9 +468,9 @@ export class DWARFLanguageExtensionPlugin implements Chrome.DevTools.LanguageExt
 
       const typeInfos = mapVector(manage(typeInfoResult.typeInfos), typeInfo => fromApiTypeInfo(manage(typeInfo)));
       const root = fromApiTypeInfo(manage(typeInfoResult.root));
-      const {location, displayValue, memoryAddress} = typeInfoResult;
+      const { location, displayValue, memoryAddress } = typeInfoResult;
       const data = typeInfoResult.data ? mapVector(manage(typeInfoResult.data), n => n) : undefined;
-      return {typeInfos, root, location, data, displayValue, memoryAddress};
+      return { typeInfos, root, location, data, displayValue, memoryAddress };
 
       function fromApiTypeInfo(apiTypeInfo: SymbolsBackend.TypeInfo): Formatters.TypeInfo {
         const apiMembers = manage(apiTypeInfo.members);
@@ -490,7 +480,7 @@ export class DWARFLanguageExtensionPlugin implements Chrome.DevTools.LanguageExt
         unmanage(apiEnumerators);
         const typeNames = mapVector(manage(apiTypeInfo.typeNames), e => e);
         unmanage(apiMembers);
-        const {typeId, size, arraySize, alignment, canExpand, isPointer, hasValue} = apiTypeInfo;
+        const { typeId, size, arraySize, alignment, canExpand, isPointer, hasValue } = apiTypeInfo;
         const formatter = Formatters.CustomFormatters.get({
           typeNames,
           typeId,
@@ -522,7 +512,7 @@ export class DWARFLanguageExtensionPlugin implements Chrome.DevTools.LanguageExt
   }
 
   async getMappedLines(rawModuleId: string, sourceFileURL: string): Promise<number[]> {
-    const {flush, manage} = createEmbindPool();
+    const { flush, manage } = createEmbindPool();
     const moduleInfo = await this.getModuleInfo(rawModuleId);
     const sourceFile = moduleInfo.urlToFileName.get(sourceFileURL);
     if (!sourceFile) {
@@ -543,7 +533,7 @@ export class DWARFLanguageExtensionPlugin implements Chrome.DevTools.LanguageExt
   }
 
   async evaluate(expression: string, context: SymbolsBackend.RawLocation, stopId: unknown):
-      Promise<Chrome.DevTools.RemoteObject|Chrome.DevTools.ForeignObject|null> {
+    Promise<Chrome.DevTools.RemoteObject | Chrome.DevTools.ForeignObject | null> {
     const valueInfo = await this.getValueInfo(expression, context, stopId);
     if (!valueInfo) {
       return null;
@@ -569,8 +559,8 @@ export class DWARFLanguageExtensionPlugin implements Chrome.DevTools.LanguageExt
 
     const properties = await remoteObject.getProperties();
     const descriptors = [];
-    for (const {name, property} of properties) {
-      descriptors.push({name, value: await property.asRemoteObject()});
+    for (const { name, property } of properties) {
+      descriptors.push({ name, value: await property.asRemoteObject() });
     }
     return descriptors;
   }
@@ -581,33 +571,32 @@ export class DWARFLanguageExtensionPlugin implements Chrome.DevTools.LanguageExt
 }
 
 export async function createPlugin(
-    hostInterface: HostInterface, resourceLoader: ResourceLoader,
-    moduleConfigurations: ModuleConfigurations = DEFAULT_MODULE_CONFIGURATIONS,
-    logPluginApiCalls = false): Promise<DWARFLanguageExtensionPlugin> {
-  const plugin = new DWARFLanguageExtensionPlugin(moduleConfigurations, resourceLoader, hostInterface);
+  hostInterface: HostInterface, resourceLoader: ResourceLoader,
+  logPluginApiCalls = false): Promise<DWARFLanguageExtensionPlugin> {
+  const plugin = new DWARFLanguageExtensionPlugin(resourceLoader, hostInterface);
   if (logPluginApiCalls) {
     const pluginLoggingProxy = {
-      get: function<Key extends keyof DWARFLanguageExtensionPlugin>(target: DWARFLanguageExtensionPlugin, key: Key):
-          DWARFLanguageExtensionPlugin[Key] {
-            if (typeof target[key] === 'function') {
-              return function(): unknown {
-                const args = [...arguments];
-                const jsonArgs = args.map(x => {
-                                       try {
-                                         return JSON.stringify(x);
-                                       } catch {
-                                         return x.toString();
-                                       }
-                                     })
-                                     .join(', ');
-                // eslint-disable-next-line no-console
-                console.info(`${key}(${jsonArgs})`);
-                // @ts-expect-error TypeScript does not play well with `arguments`
-                return (target[key] as (...args: any[]) => void).apply(target, arguments);
-              } as unknown as DWARFLanguageExtensionPlugin[Key];
-            }
-            return Reflect.get(target, key);
-          },
+      get: function <Key extends keyof DWARFLanguageExtensionPlugin>(target: DWARFLanguageExtensionPlugin, key: Key):
+        DWARFLanguageExtensionPlugin[Key] {
+        if (typeof target[key] === 'function') {
+          return function (): unknown {
+            const args = [...arguments];
+            const jsonArgs = args.map(x => {
+              try {
+                return JSON.stringify(x);
+              } catch {
+                return x.toString();
+              }
+            })
+              .join(', ');
+            // eslint-disable-next-line no-console
+            console.info(`${key}(${jsonArgs})`);
+            // @ts-expect-error TypeScript does not play well with `arguments`
+            return (target[key] as (...args: any[]) => void).apply(target, arguments);
+          } as unknown as DWARFLanguageExtensionPlugin[Key];
+        }
+        return Reflect.get(target, key);
+      },
     };
 
     return new Proxy(plugin, pluginLoggingProxy);

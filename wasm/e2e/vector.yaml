@@ -4,7 +4,7 @@
 # https://github.com/ChromeDevTools/devtools-frontend/blob/main/extensions/cxx_debugging/e2e/tests/vector.yaml
 
 name: Test std::vector
-source_file: //extensions/cxx_debugging/e2e/resources/vector.cc
+source_file: resources/vector.cc
 flags: [
   [-g, -fdebug-compilation-dir=., -fno-limit-debug-info, -sWASM_BIGINT, -sERROR_ON_WASM_CHANGES_AFTER_LINK],
   [-g, -fdebug-compilation-dir=., -fno-limit-debug-info, -sWASM_BIGINT, -sERROR_ON_WASM_CHANGES_AFTER_LINK, -gsplit-dwarf],

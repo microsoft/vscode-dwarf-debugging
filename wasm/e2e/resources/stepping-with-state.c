@@ -12,7 +12,7 @@ void multiplyByConstant(int *array, int length, int constant) {
 }
 
 int main() {
-  int n = 10;
+  const int n = 10;
   int x[n];
 
   /* initialize x */

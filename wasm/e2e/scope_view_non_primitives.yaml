@@ -6,7 +6,7 @@
 name: Scope view formats non primitive types correctly
 # This test checks that the scope view displays
 # arrays, structs and pointers correctly
-source_file: //extensions/cxx_debugging/e2e/resources/scope-view-non-primitives.c
+source_file: resources/scope-view-non-primitives.c
 flags: [
   [-g, -fdebug-compilation-dir=., -sWASM_BIGINT, -sERROR_ON_WASM_CHANGES_AFTER_LINK],
   [-g, -fdebug-compilation-dir=., -sWASM_BIGINT, -sERROR_ON_WASM_CHANGES_AFTER_LINK, -gsplit-dwarf],
