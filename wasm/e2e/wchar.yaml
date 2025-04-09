@@ -1,6 +1,7 @@
-# Copyright 2023 The Chromium Authors. All rights reserved.
-# Use of this source code is governed by a BSD-style license that can be
-# found in the LICENSE file.
+# This file is based on a file from revision cf3a5c70b97b388fff3490b62f1bdaaa6a26f8e1 
+# of the Chrome DevTools C/C++ Debugging Extension, see the wasm/symbols-backend/LICENSE file.
+#
+# https://github.com/ChromeDevTools/devtools-frontend/blob/main/extensions/cxx_debugging/e2e/tests/wchar.yaml
 
 name: Test Wide-Character Strings
 source_file: //extensions/cxx_debugging/e2e/resources/wchar.cc
