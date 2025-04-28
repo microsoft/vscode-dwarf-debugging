@@ -19,14 +19,21 @@ export function resolveSourcePathToURL(sourcePath: string, baseURL: URL): URL {
   // Normalize '\' to '/' in sourcePath first.
   const resolvedSourcePath = sourcePath.replace(/\\/g, '/');
 
-  if (resolvedSourcePath.startsWith('/')) {
-    if (resolvedSourcePath.startsWith('//')) {
-      return new URL(`file:${resolvedSourcePath}`);
+  try {
+    if (resolvedSourcePath.startsWith('/')) {
+      if (resolvedSourcePath.startsWith('//')) {
+        return new URL(`file:${resolvedSourcePath}`);
+      }
+      return new URL(`file://${resolvedSourcePath}`);
     }
-    return new URL(`file://${resolvedSourcePath}`);
+    if (/^[A-Z]:/i.test(resolvedSourcePath)) {
+      return new URL(`file:/${resolvedSourcePath}`);
+    }
+    return new URL(resolvedSourcePath, baseURL.href);
+  } catch (e) {
+    if (e instanceof TypeError && 'code' in e && e.code === 'ERR_INVALID_URL') {
+      return new URL(`file://${resolvedSourcePath.replace(/\/+/g, '/')}`);
+    }
+    throw e;
   }
-  if (/^[A-Z]:/i.test(resolvedSourcePath)) {
-    return new URL(`file:/${resolvedSourcePath}`);
-  }
-  return new URL(resolvedSourcePath, baseURL.href);
 }

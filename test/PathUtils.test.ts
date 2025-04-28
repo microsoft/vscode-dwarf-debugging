@@ -53,5 +53,12 @@ describe('PathUtils', () => {
         resolveSourcePathToURL('f:\\netdrive\\file.wasm.debug.wasm', new URL('http://localhost:8000/wasm/file.wasm')).href,
         'file:///f:/netdrive/file.wasm.debug.wasm');
     });
+
+    it('gracefully deals with invalid host names in URL as if it was a file on localhost instead', () => {
+      const BASE_URL = new URL('http://web.dev/file.wasm');
+      assert.equal(
+        resolveSourcePathToURL('//v24.0/build/sysroot/wasi-libc-wasm32-wasip1/dlmalloc/include/unistd.h', BASE_URL).href,
+        'file:///v24.0/build/sysroot/wasi-libc-wasm32-wasip1/dlmalloc/include/unistd.h');
+    });
   });
 });
