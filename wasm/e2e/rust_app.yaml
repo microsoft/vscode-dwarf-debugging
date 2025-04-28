@@ -1,0 +1,131 @@
+name: Rust application
+source_file: resources/app.rs
+flags: [
+  [--target, wasm32-wasip1, -g]]
+only: true
+script:
+  - reason: setup
+    actions:
+    - file: app.rs
+      action: set_breakpoint
+      breakpoint: 14
+    - file: app.rs
+      action: set_breakpoint
+      breakpoint: 16
+    - file: app.rs
+      action: set_breakpoint
+      breakpoint: 19
+    - file: app.rs
+      action: set_breakpoint
+      breakpoint: 38
+    - file: app.rs
+      action: set_breakpoint
+      breakpoint: 46
+    - file: app.rs
+      action: set_breakpoint
+      breakpoint: 54
+    - file: app.rs
+      action: set_breakpoint
+      breakpoint: 61
+  - reason: breakpoint
+    file: app.rs
+    line: 14
+    variables:
+      - name: Parameter.animal
+        type: app::Animal
+      - name: Parameter.animal.Dog
+        type: app::Animal::Dog
+      - name: Parameter.animal.Dog.0.string
+        value: '"Biscuit"'
+      - name: Parameter.animal.Dog.1
+        value: 8.51
+  - reason: breakpoint
+    file: app.rs
+    line: 16
+    variables:
+      - name: Local.name.string
+        value: '"Biscuit"'
+      - name: Local.weight
+        value: 8.51
+  - reason: breakpoint
+    file: app.rs
+    line: 14
+    variables:
+      - name: Parameter.animal
+        type: app::Animal
+      - name: Parameter.animal.Cat
+        type: app::Animal::Cat
+      - name: Parameter.animal.Cat.name.string
+        value: '"Whiskers"'
+      - name: Parameter.animal.Cat.weight
+        value: 3.15
+  - reason: breakpoint
+    file: app.rs
+    line: 19
+    variables:
+      - name: Local.name.string
+        value: '"Whiskers"'
+      - name: Local.weight
+        value: 3.15
+  - reason: breakpoint
+    file: app.rs
+    line: 38
+    variables:
+      - name: Local.vector
+        type: 'alloc::vec::Vec<int, alloc::alloc::Global>'
+      - name: Local.vector.0
+        value: 1
+      - name: Local.vector.1
+        value: 2
+      - name: Local.vector.2
+        value: 3
+      - name: Local.vector.3
+        value: 4
+      - name: Local.vector.4
+        value: 5
+      - name: Local.vector_slice
+        type: '&[i32]'
+      - name: Local.vector_slice.0
+        value: 2
+      - name: Local.vector_slice.1
+        value: 3
+      - name: Local.string_slice.size
+        value: 3
+      - name: Local.string_slice
+        type: '&str'
+      - name: Local.string_slice.string
+        value: '"scu"'
+  - reason: breakpoint
+    file: app.rs
+    line: 46
+    variables:
+      - name: Local.strong_ref.$0
+        type: app::Point2D
+      - name: Local.strong_ref.$0.x
+        value: 20
+      - name: Local.strong_ref.$0.y
+        value: 40
+      - name: Local.weak_ref_2.$0
+        type: app::Point2D
+      - name: Local.weak_ref_2.$0.x
+        value: 20
+      - name: Local.weak_ref_2.$0.y
+        value: 40
+      - name: Local.weak_ref_2.strong_count
+        value: 1
+      - name: Local.weak_ref_2.weak_count
+        value: 2
+  - reason: breakpoint
+    file: app.rs
+    line: 54
+    variables:
+      - name: Local.weak_ref_2.strong_count
+        value: 1
+      - name: Local.weak_ref_2.weak_count
+        value: 1
+  - reason: breakpoint
+    file: app.rs
+    line: 61
+    variables:
+      - name: Local.weak_ref_2.$0
+        value: null

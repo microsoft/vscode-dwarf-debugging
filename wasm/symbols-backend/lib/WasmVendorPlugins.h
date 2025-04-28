@@ -4,13 +4,20 @@
 
 #ifndef EXTENSIONS_CXX_DEBUGGING_WASMVENDORPLUGINS_H_
 #define EXTENSIONS_CXX_DEBUGGING_WASMVENDORPLUGINS_H_
+
 #include "ApiContext.h"
+#include "Plugins/SymbolFile/DWARF/DWARFASTParserClang.h"
 #include "Plugins/SymbolFile/DWARF/DWARFDeclContext.h"
 #include "Plugins/SymbolFile/DWARF/SymbolFileDWARF.h"
 #include "Plugins/TypeSystem/Clang/TypeSystemClang.h"
+#include "Plugins/ExpressionParser/Clang/ClangExternalASTSourceCallbacks.h"
 #include "lldb/Core/Debugger.h"
+#include "lldb/Symbol/TypeSystem.h"
 #include "lldb/Target/RegisterContext.h"
 #include "lldb/Target/Unwind.h"
+#include "lldb/lldb-forward.h"
+#include "lldb/lldb-types.h"
+#include "llvm/ADT/Optional.h"
 #include "llvm/BinaryFormat/Dwarf.h"
 
 class SymbolVendorWASM;
@@ -322,6 +329,127 @@ class SymbolFileWasmDWARF : public ::SymbolFileDWARF {
 
  private:
   WasmValueLoader* current_value_loader_ = nullptr;
+};
+
+namespace types {
+
+struct MemberInfo {
+  std::string name;
+  uint32_t location;
+  lldb_private::CompilerType type;
+};
+
+struct VariantInfo {
+  llvm::Optional<uint64_t> discr_value;
+  llvm::SmallVector<MemberInfo, 1> members;
+};
+
+struct VariantPartInfo {
+  MemberInfo discr_member;
+  llvm::SmallVector<VariantInfo, 1> variants;
+};
+
+struct TemplateParameterInfo {
+  lldb_private::CompilerType type;
+  llvm::Optional<std::string> name;
+};
+
+struct ExtendedTypeInfo {
+  lldb::LanguageType language;
+  llvm::SmallVector<VariantPartInfo, 1> variant_parts;
+  llvm::SmallVector<TemplateParameterInfo, 1> template_parameters;
+  llvm::Optional<uint32_t> byte_size;
+};
+
+} // namespace types
+
+class DWARFASTParserClangExtended : public DWARFASTParserClang {
+public:
+  DWARFASTParserClangExtended(lldb_private::TypeSystemClang &ast)
+      : DWARFASTParserClang(ast) {}
+
+  bool
+  CompleteTypeFromDWARF(const DWARFDIE &die, lldb_private::Type *type,
+                        lldb_private::CompilerType &compiler_type) override;
+};
+
+class TypeSystemClangExtended : public lldb_private::TypeSystemClang {
+  // LLVM RTTI support
+  static char ID;
+
+public:
+  // LLVM RTTI support
+  bool isA(const void *ClassID) const override {
+    return ClassID == &ID || lldb_private::TypeSystemClang::isA(ClassID);
+  }
+  static bool classof(const TypeSystem *ts) { return ts->isA(&ID); }
+
+  explicit TypeSystemClangExtended(llvm::StringRef name, llvm::Triple triple);
+
+  DWARFASTParser *GetDWARFParser() override;
+
+  static void Initialize();
+  static void Terminate();
+
+  static lldb::TypeSystemSP CreateInstance(lldb::LanguageType language,
+                                           lldb_private::Module *module,
+                                           lldb_private::Target *target);
+
+  llvm::Optional<uint64_t>
+  GetBitSize(lldb::opaque_compiler_type_t type,
+             lldb_private::ExecutionContextScope *exe_scope) override;
+
+  static types::ExtendedTypeInfo *
+  GetExtendedTypeInfo(lldb_private::CompilerType type,
+                      bool create_if_needed = false);
+  types::ExtendedTypeInfo *
+  GetExtendedTypeInfo(lldb::opaque_compiler_type_t type,
+                      bool create_if_needed = false);
+
+private:
+  llvm::Optional<lldb::LanguageType> m_language;
+  std::unique_ptr<DWARFASTParserClangExtended> m_dwarf_ast_parser_up;
+  std::map<lldb::opaque_compiler_type_t, types::ExtendedTypeInfo> m_type_info;
+};
+
+// We need to extend ClangExternalASTSourceCallbacks to make sure that the methods in the
+// base TypeSystemClang class access the instance of ClangASTImporter held by our own
+// DWARFASTParserClangExtended instead of the instance of DWARFASTParserClang declared as
+// as private field on TypeSystemClang.
+// TypeSystemClang::LayoutRecordType does not honour the fact that we override GetDWARFParser()
+// and still uses it's private field m_dwarf_ast_parser_up which causes the parsed types
+// to not include the correct size and field layout information.
+class ClangExternalASTSourceCallbacks
+    : public lldb_private::ClangExternalASTSourceCallbacks {
+  /// LLVM RTTI support.
+  static char ID;
+
+public:
+  /// LLVM RTTI support.
+  bool isA(const void *ClassID) const override {
+    return ClassID == &ID ||
+           lldb_private::ClangExternalASTSourceCallbacks::isA(ClassID);
+  }
+  static bool classof(const clang::ExternalASTSource *s) { return s->isA(&ID); }
+
+  explicit ClangExternalASTSourceCallbacks(TypeSystemClangExtended &ast)
+      : lldb_private::ClangExternalASTSourceCallbacks(ast),
+        m_ast_parser(
+            static_cast<DWARFASTParserClangExtended *>(ast.GetDWARFParser())) {}
+
+  bool layoutRecordType(
+      const clang::RecordDecl *Record, uint64_t &Size, uint64_t &Alignment,
+      llvm::DenseMap<const clang::FieldDecl *, uint64_t> &FieldOffsets,
+      llvm::DenseMap<const clang::CXXRecordDecl *, clang::CharUnits>
+          &BaseOffsets,
+      llvm::DenseMap<const clang::CXXRecordDecl *, clang::CharUnits>
+          &VirtualBaseOffsets) override {
+    return m_ast_parser->GetClangASTImporter().LayoutRecordType(
+        Record, Size, Alignment, FieldOffsets, BaseOffsets, VirtualBaseOffsets);
+  }
+
+private:
+  DWARFASTParserClangExtended *m_ast_parser;
 };
 
 }  // namespace symbols_backend

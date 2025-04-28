@@ -14,7 +14,6 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
-#include <memory>
 #include <utility>
 
 namespace symbols_backend {

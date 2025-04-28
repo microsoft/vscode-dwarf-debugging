@@ -8,11 +8,11 @@
 #ifndef EXTENSIONS_CXX_DEBUGGING_API_H_
 #define EXTENSIONS_CXX_DEBUGGING_API_H_
 
+#include "llvm/ADT/Optional.h"
+#include <cstdint>
 #include <string>
 #include <vector>
 #include <emscripten/val.h>
-
-#include "llvm/ADT/Optional.h"
 
 namespace symbols_backend {
 namespace api {
@@ -222,18 +222,101 @@ class Enumerator {
   }
 };
 
+class VariantInfo {
+  llvm::Optional<uint64_t> discriminator_value_ = {};
+  std::vector<FieldInfo> members_ = {};
+
+public:
+  VariantInfo() = default;
+  virtual ~VariantInfo() = default;
+  llvm::Optional<uint64_t> GetDiscriminatorValue() const { return discriminator_value_; }
+  VariantInfo &SetDiscriminatorValue(llvm::Optional<uint64_t> value) {
+    discriminator_value_ = std::move(value);
+    return *this;
+  }
+  std::vector<FieldInfo> GetMembers() const { return members_; }
+  VariantInfo &SetMembers(std::vector<FieldInfo> value) {
+    members_ = std::move(value);
+    return *this;
+  }
+};
+
+class VariantPartInfo {
+  FieldInfo discriminator_member_;
+  std::vector<VariantInfo> variants_;
+
+public:
+  VariantPartInfo() = default;
+  virtual ~VariantPartInfo() = default;
+  FieldInfo GetDiscriminatorMember() const { return discriminator_member_; }
+  VariantPartInfo &SetDiscriminatorMember(FieldInfo value) {
+    discriminator_member_ = std::move(value);
+    return *this;
+  }
+  std::vector<VariantInfo> GetVariants() const { return variants_; }
+  VariantPartInfo &SetVariants(std::vector<VariantInfo> value) {
+    variants_ = std::move(value);
+    return *this;
+  }
+};
+
+class TemplateParameterInfo {
+  std::string type_id_ = {};
+  llvm::Optional<std::string> name_;
+
+public:
+  TemplateParameterInfo() = default;
+  virtual ~TemplateParameterInfo() = default;
+  std::string GetTypeId() const { return type_id_; }
+  TemplateParameterInfo &SetTypeId(std::string value) {
+    type_id_ = std::move(value);
+    return *this;
+  }
+  llvm::Optional<std::string> GetName() const { return name_; }
+  TemplateParameterInfo &SetName(llvm::Optional<std::string> value) {
+    name_ = std::move(value);
+    return *this;
+  }
+};
+
+class ExtendedTypeInfo {
+  uint16_t language_id_;
+  std::vector<VariantPartInfo> variant_parts_;
+  std::vector<TemplateParameterInfo> template_parameters_;
+
+public:
+  ExtendedTypeInfo() = default;
+  virtual ~ExtendedTypeInfo() = default;
+  uint16_t GetLanguageId() const { return language_id_; }
+  ExtendedTypeInfo &SetLanguageId(uint16_t value) {
+    language_id_ = std::move(value);
+    return *this;
+  }
+  std::vector<VariantPartInfo> GetVariantParts() const { return variant_parts_; }
+  ExtendedTypeInfo &SetVariantParts(std::vector<VariantPartInfo> value) {
+    variant_parts_ = std::move(value);
+    return *this;
+  }
+  std::vector<TemplateParameterInfo> GetTemplateParameters() const { return template_parameters_; }
+  ExtendedTypeInfo &SetTemplateParameters(std::vector<TemplateParameterInfo> value) {
+    template_parameters_ = std::move(value);
+    return *this;
+  }
+};
+
 class TypeInfo {
  private:
   std::vector<std::string> type_names_ = {};
   std::string type_id_ = {};
-  int32_t alignment_ = {};
-  int32_t size_ = {};
+  uint32_t alignment_ = {};
+  uint32_t size_ = {};
   bool can_expand_ = {};
   bool has_value_ = {};
-  llvm::Optional<int32_t> array_size_ = {};
+  uint32_t array_size_ = {};
   bool is_pointer_ = {};
   std::vector<FieldInfo> members_ = {};
   std::vector<Enumerator> enumerators_ = {};
+  llvm::Optional<ExtendedTypeInfo> extended_info_ = {};
 
  public:
   TypeInfo() = default;
@@ -248,13 +331,13 @@ class TypeInfo {
     type_id_ = std::move(value);
     return *this;
   }
-  int32_t GetAlignment() const { return alignment_; }
-  TypeInfo &SetAlignment(int32_t value) {
+  uint32_t GetAlignment() const { return alignment_; }
+  TypeInfo &SetAlignment(uint32_t value) {
     alignment_ = std::move(value);
     return *this;
   }
-  int32_t GetSize() const { return size_; }
-  TypeInfo &SetSize(int32_t value) {
+  uint32_t GetSize() const { return size_; }
+  TypeInfo &SetSize(uint32_t value) {
     size_ = std::move(value);
     return *this;
   }
@@ -268,8 +351,8 @@ class TypeInfo {
     has_value_ = std::move(value);
     return *this;
   }
-  llvm::Optional<int32_t> GetArraySize() const { return array_size_; }
-  TypeInfo &SetArraySize(llvm::Optional<int32_t> value) {
+  uint32_t GetArraySize() const { return array_size_; }
+  TypeInfo &SetArraySize(uint32_t value) {
     array_size_ = std::move(value);
     return *this;
   }
@@ -286,6 +369,11 @@ class TypeInfo {
   std::vector<Enumerator> GetEnumerators() const { return enumerators_; }
   TypeInfo &SetEnumerators(std::vector<Enumerator> value) {
     enumerators_ = std::move(value);
+    return *this;
+  }
+  llvm::Optional<ExtendedTypeInfo> GetExtendedInfo() const { return extended_info_; }
+  TypeInfo &SetExtendedInfo(llvm::Optional<ExtendedTypeInfo> value) {
+    extended_info_ = std::move(value);
     return *this;
   }
 };

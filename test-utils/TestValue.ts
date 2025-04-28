@@ -3,14 +3,24 @@
 //
 // https://github.com/ChromeDevTools/devtools-frontend/blob/main/extensions/cxx_debugging/tests/TestUtils.ts
 
-import type { Value } from '../src/CustomFormatters';
+import type { ExtendedTypeInfo, Value } from '../src/CustomFormatters';
+
+interface TypedArrayLike {
+  readonly BYTES_PER_ELEMENT: number;
+  readonly buffer: ArrayBufferLike;
+  readonly byteLength: number;
+  readonly byteOffset: number;
+}
 
 export default class TestValue implements Value {
   private dataView: DataView<ArrayBuffer>;
+  private typeMap: { [typeId: string]: TestValue; } = {};
   members: { [key: string]: TestValue, [key: number]: TestValue; };
   location: number;
   size: number;
   typeNames: string[];
+  isEnumeratedValue: boolean = false;
+  extendedTypeInfo?: ExtendedTypeInfo | undefined;
 
   static fromInt8(value: number, typeName = 'int8_t'): TestValue {
     const content = new DataView(new ArrayBuffer(1));
@@ -72,8 +82,10 @@ export default class TestValue implements Value {
     for (let i = 0; i < elements.length; ++i) {
       members[i] = elements[i];
     }
-    const value = new TestValue(content, `${elements[0].typeNames[0]}${space}*`, members);
-    return value;
+    return new TestValue(content, `${elements[0].typeNames[0]}${space}*`, members);
+  }
+  static fromType(typeName: string, data: TypedArrayLike = new Uint8Array(), location?: number) {
+    return new TestValue(new DataView(data.buffer), typeName, undefined, location);
   }
   static fromMembers(typeName: string, members: { [key: string]: TestValue, [key: number]: TestValue; }): TestValue {
     return new TestValue(new DataView(new ArrayBuffer(0)), typeName, members);
@@ -109,6 +121,18 @@ export default class TestValue implements Value {
   asFloat64(): number {
     return this.dataView.getFloat64(0, true);
   }
+  asType(typeId: string, offset = 0): Value {
+    return this.typeMap[typeId] ?? new TestValue(this.dataView, typeId, undefined, this.location + offset);
+  }
+  asPointerToType(typeId: string): Value {
+    return new TestValue(this.dataView, `${typeId} *`, new Proxy({}, {
+      get(_target, p) {
+        if (typeof p === 'string' && /^\*|(\d+)$/.test(p)) {
+          return TestValue.fromType(typeId);
+        }
+      }
+    }));
+  }
   asDataView(offset?: number, size?: number): DataView<ArrayBuffer> {
     offset = this.location + (offset ?? 0);
     size = Math.min(size ?? this.size, this.size - Math.max(0, offset));
@@ -117,25 +141,59 @@ export default class TestValue implements Value {
   getMembers(): string[] {
     return Object.keys(this.members);
   }
-
   $(member: string | number): Value {
     if (typeof member === 'number' || !member.includes('.')) {
-      return this.members[member];
+      return this.members[member] || (() => { throw new Error(`Invalid member ${member}`); })();
     }
-    let value = this as Value;
+    let value: Value = this;
     for (const prop of member.split('.')) {
       value = value.$(prop);
     }
     return value;
   }
 
+  offsetBy(offset: number) {
+    return new TestValue(this.dataView, this.typeNames[0], this.members, this.location + offset);
+  }
+
+  registerAsType(value: TestValue): string {
+    const typeId = `${Object.keys(this.typeMap).length + 1}`;
+    this.typeMap[typeId] = value;
+    return typeId;
+  }
+
+  withVariants(discriminator: TestValue, ...variants: [number, string, TestValue][]) {
+    this.extendedTypeInfo ??= { languageId: 0, variantParts: [], templateParameters: [] };
+    this.extendedTypeInfo.variantParts = [{
+      discriminatorMember: { typeId: this.registerAsType(discriminator), offset: 0 },
+      variants: variants.map(([discriminatorValue, name, variant]) => ({
+        discriminatorValue: BigInt(discriminatorValue),
+        members: [{
+          name,
+          typeId: this.registerAsType(TestValue.fromMembers(name, { '__0': variant.offsetBy(discriminator.size) })),
+          offset: discriminator.size,
+        }]
+      })),
+    }];
+    return this;
+  }
+
+  withTemplateParameters(...typeNames: string[]) {
+    this.extendedTypeInfo ??= { languageId: 0, variantParts: [], templateParameters: [] };
+    this.extendedTypeInfo.templateParameters.push(...typeNames.map(typeId => ({ typeId })));
+    return this;
+  }
+
   constructor(
-    content: DataView<ArrayBuffer>, typeName: string,
-    members?: { [key: string]: TestValue, [key: number]: TestValue; }) {
-    this.location = 0;
+    content: DataView<ArrayBuffer>,
+    typeName: string,
+    members: { [key: string]: TestValue, [key: number]: TestValue; } = {},
+    location: number = 0,
+  ) {
+    this.location = location;
     this.size = content.byteLength;
     this.typeNames = [typeName];
-    this.members = members || {};
+    this.members = members;
     this.dataView = content;
   }
 }

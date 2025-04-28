@@ -5,11 +5,12 @@
 
 import {
   CustomFormatters,
+  type FieldInfo,
   type LazyObject,
   PrimitiveLazyObject,
   type TypeInfo,
   type Value,
-  type WasmInterface,
+  type WasmInterface
 } from './CustomFormatters';
 import type { ForeignObject } from './WasmTypes';
 
@@ -43,6 +44,9 @@ CustomFormatters.addFormatter({ types: ['uint8_t', 'int8_t'], format: formatChar
 
 export function formatChar(wasm: WasmInterface, value: Value): string | number {
   const char = value.typeNames.includes('int8_t') ? Math.abs(value.asInt8()) : value.asUint8();
+  if (value.isEnumeratedValue) {
+    return char;
+  }
   switch (char) {
     case 0x0:
       return '\'\\0\'';
@@ -299,3 +303,150 @@ export function formatExternRef(wasm: WasmInterface, value: Value): () => LazyOb
   return () => obj;
 }
 CustomFormatters.addFormatter({ types: ['__externref_t', 'externref_t'], format: formatExternRef });
+
+/*
+ * Rust language support
+ */
+export const enum LanguageId {
+  Rust = 0x1c,
+}
+
+type TypeInfoWithExtendedInfo = TypeInfo & Required<Pick<TypeInfo, 'extendedInfo'>>;
+
+function extendedLanguageTypeMatch(
+  languageId: LanguageId,
+  predicate: string | RegExp | ((type: TypeInfoWithExtendedInfo) => boolean),
+): (type: TypeInfo) => boolean {
+  if (typeof predicate !== 'function') {
+    if (typeof predicate === 'string') {
+      const typeName = predicate;
+      predicate = type => type.typeNames.includes(typeName);
+    } else {
+      const typeRegExp = predicate;
+      predicate = type => type.typeNames.some(typeName => typeRegExp.test(typeName));
+    }
+  }
+  return type => {
+    return type.extendedInfo?.languageId === languageId && predicate(type as TypeInfoWithExtendedInfo);
+  };
+}
+
+const rustTypeMatch = extendedLanguageTypeMatch.bind(null, LanguageId.Rust);
+
+function hasOnlyRustTupleLikeMembers(type: TypeInfo) {
+  return type.members.length > 0 && type.members.every(({ name }, i) => name === `__${i}`);
+}
+
+function hasVariantParts(type: TypeInfo) {
+  return type.extendedInfo !== undefined && type.extendedInfo.variantParts.length > 0;
+}
+
+function unwrapLoneRustTupleLikeMember(value: Value) {
+  const members = value.getMembers();
+  return members.length === 1 && members[0] === '__0' ? value.$('__0') : value;
+}
+
+export function formatRustSumType(wasm: WasmInterface, value: Value) {
+  const variantPart = value.extendedTypeInfo!.variantParts[0];
+  if (!variantPart) {
+    throw new Error(`Can't format sum type without variant info`);
+  }
+
+  const discriminatorValue = getDiscriminatorValue(value, variantPart.discriminatorMember);
+  const variant =
+    variantPart.variants.find(v => v.discriminatorValue === discriminatorValue) ||
+    variantPart.variants.find(v => v.discriminatorValue === undefined);
+  if (!variant) {
+    throw new Error(`Invalid discriminator value ${discriminatorValue}`);
+  }
+  if (!variant.members[0]) {
+    throw new Error(`Can't format sum type where variant is missing member info`);
+  }
+
+  const { name = discriminatorValue.toString(), typeId, offset } = variant.members[0];
+  const variantValue = value.asType(typeId, offset);
+
+  return { [name]: unwrapLoneRustTupleLikeMember(variantValue) };
+}
+
+export function formatRustTuple(wasm: WasmInterface, value: Value): Value[] | { [key: string]: Value; } {
+  return value.getMembers().map(m => value.$(m));
+}
+
+export function formatRustArraySlice(wasm: WasmInterface, value: Value) {
+  const data = value.$('data_ptr');
+  const size = value.$('length').asUint32();
+  const elements: Value[] = [];
+  for (let i = 0; i < size; ++i) {
+    elements.push(data.$(i));
+  }
+  return elements;
+}
+
+export function formatRustVector(wasm: WasmInterface, value: Value) {
+  const elementTypeId = value.extendedTypeInfo?.templateParameters[0]?.typeId;
+  if (!elementTypeId) {
+    throw new Error(`Can't determine element type`);
+  }
+  const data = value.$('buf.inner.ptr').asPointerToType(elementTypeId);
+  const size = value.$('len').asUint32();
+  const elements: Value[] = [];
+  for (let i = 0; i < size; ++i) {
+    elements.push(data.$(i));
+  }
+  return elements;
+}
+
+export function formatRustStringSlice(wasm: WasmInterface, value: Value) {
+  const data = value.$('data_ptr').asUint32();
+  const size = value.$('length').asUint32();
+  const bytes = wasm.readMemory(data, Math.min(size, Constants.MAX_STRING_LEN));
+  const decoder = new TextDecoder();
+  return formattedStringResult(bytes, decoder.decode.bind(decoder));
+}
+
+export function formatRustString(wasm: WasmInterface, value: Value) {
+  const data = value.$('vec.buf.inner.ptr').asUint32();
+  const size = value.$('vec.len').asUint32();
+  const bytes = wasm.readMemory(data, Math.min(size, Constants.MAX_STRING_LEN));
+  const decoder = new TextDecoder();
+  return formattedStringResult(bytes, decoder.decode.bind(decoder));
+}
+
+export function formatRustRcPointer(wasm: WasmInterface, value: Value): { [key: string]: Value | null | number; } {
+  const box = value.$('ptr.pointer.*');
+  const boxedValue = box.$('value');
+  const strongCount = box.$('strong').asUint32();
+  const weakCount = box.$('weak').asUint32() - 1; // Rc::weak_count() substracts one
+  if (!strongCount) {
+    return { '0x0': null };
+  }
+  return {
+    [`0x${boxedValue.location.toString(16)}`]: boxedValue,
+    ['strong_count']: strongCount,
+    ['weak_count']: weakCount,
+  };
+}
+
+function getDiscriminatorValue(value: Value, discriminatorMember: FieldInfo) {
+  const discriminatorValue = value.asType(discriminatorMember.typeId, discriminatorMember.offset);
+  switch (discriminatorValue.size) {
+    case 1:
+      return BigInt(discriminatorValue.asUint8());
+    case 2:
+      return BigInt(discriminatorValue.asUint16());
+    case 4:
+      return BigInt(discriminatorValue.asUint32());
+    case 8:
+      return discriminatorValue.asUint64();
+  }
+  throw new Error(`Invalid size ${discriminatorValue.size} from discriminator member`);
+}
+
+CustomFormatters.addFormatter({ types: rustTypeMatch(hasVariantParts), format: formatRustSumType });
+CustomFormatters.addFormatter({ types: rustTypeMatch(hasOnlyRustTupleLikeMembers), format: formatRustTuple });
+CustomFormatters.addFormatter({ types: rustTypeMatch(/^&\[.+\]$/), format: formatRustArraySlice });
+CustomFormatters.addFormatter({ types: rustTypeMatch(/^alloc::vec::Vec<.+>$/), format: formatRustVector });
+CustomFormatters.addFormatter({ types: rustTypeMatch('&str'), format: formatRustStringSlice });
+CustomFormatters.addFormatter({ types: rustTypeMatch('alloc::string::String'), format: formatRustString });
+CustomFormatters.addFormatter({ types: rustTypeMatch(/^alloc::rc::(Rc|Weak)<.+>$/), format: formatRustRcPointer });
