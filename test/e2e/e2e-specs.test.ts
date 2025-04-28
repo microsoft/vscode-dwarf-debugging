@@ -197,11 +197,12 @@ function testCaseOutputName(sourceFilePath: string, name: string, i: number) {
 
 async function getVariable(debuggerSession: DebuggerSession, scopedPath: string) {
   const [scope, name, ...propertiesPath] = scopedPath.split('.');
-  assert(scope);
-  assert(name);
+  assert(scope && name, `Expected scope and variable name to be specified.`);
 
   const variableList = await debuggerSession.listVariablesInScope();
-  assert(variableList.some(v => v.name === name && v.scope === scope.toUpperCase()), `Variable ${scope}.${name} does not exist.`);
+  assert(
+    variableList.some(v => v.name === name && v.scope === scope.toUpperCase()),
+    `Variable ${scope}.${name} does not exist, variables in scope: ${variableList.map(v => `${v.scope}.${v.name}`).join(', ')}`);
 
   let value = await debuggerSession.evaluate(name);
   let parent = `${scope}.${name}`;
@@ -218,7 +219,7 @@ async function getVariable(debuggerSession: DebuggerSession, scopedPath: string)
     const property = /^\$\d+$/.test(name)
       ? propertiesList[parseInt(name.slice(1))]
       : propertiesList.find(p => p.name === name);
-    assert(property, `Variable ${parent}.${name} does not exist.`);
+    assert(property, `Property ${name} on ${parent} does not exist, available properties: ${propertiesList.map(p => p.name).join(', ')}`);
 
     value = property.value;
     parent = `${parent}.${name}`;

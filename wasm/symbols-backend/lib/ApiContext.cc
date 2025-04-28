@@ -6,6 +6,7 @@
 #include "Expressions.h"
 #include "Variables.h"
 #include "WasmModule.h"
+#include "WasmVendorPlugins.h"
 #include "api.h"
 
 #include "lldb/Symbol/CompilerType.h"
@@ -15,6 +16,7 @@
 #include "llvm/ADT/APFloat.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/None.h"
+#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
@@ -26,7 +28,6 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/raw_ostream.h"
 
-#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
@@ -42,6 +43,16 @@ namespace symbols_backend {
 namespace api {
 
 namespace {
+
+template <typename In, typename Out>
+std::vector<Out> MapToVector(const llvm::SmallVector<In, 1> input,
+                             std::function<Out(const In &)> transform) {
+  std::vector<Out> output;
+  for (auto element : input) {
+    output.push_back(transform(element));
+  }
+  return std::move(output);
+}
 
 Error MakeError(Error::Code ec, llvm::Twine message) {
   Error e;
@@ -371,6 +382,7 @@ api::TypeInfo ApiContext::GetApiTypeInfo(
     return true;
   });
 
+  auto type_system = type.GetTypeSystem().dyn_cast_or_null<TypeSystemClangExtended>();
   auto size = type.GetByteSize(nullptr);
   uint64_t array_size = 0;
   size_t alignment = type.GetTypeBitAlign(nullptr).value_or(0) / 8;
@@ -399,7 +411,8 @@ api::TypeInfo ApiContext::GetApiTypeInfo(
       .SetIsPointer(type.IsPointerOrReferenceType(nullptr))
       .SetAlignment(alignment)
       .SetMembers(std::move(members))
-      .SetEnumerators(std::move(enumerators));
+      .SetEnumerators(std::move(enumerators))
+      .SetExtendedInfo(GetApiExtendedTypeInfo(type));
 }
 
 llvm::Expected<std::vector<api::TypeInfo>> ApiContext::GetApiTypeInfos(
@@ -424,9 +437,25 @@ llvm::Expected<std::vector<api::TypeInfo>> ApiContext::GetApiTypeInfos(
     auto member_info = SubObjectInfo::GetMembers(type);
     for (const auto& member : member_info) {
       if (!visited_types.contains(member.Type().GetOpaqueQualType())) {
-        queue.push_back({member.Type(), depth + 1});
+        queue.push_back({ member.Type(), depth + 1 });
       }
     }
+
+    auto extended_info = TypeSystemClangExtended::GetExtendedTypeInfo(type);
+    if (extended_info) {
+      for (auto variant_part : extended_info->variant_parts) {
+        queue.push_back({variant_part.discr_member.type, depth + 1});
+        for (auto variant : variant_part.variants) {
+          for (auto member : variant.members) {
+            queue.push_back({member.type, depth + 1});
+          }
+        }
+      }
+      for (auto parameter : extended_info->template_parameters) {
+        queue.push_back({parameter.type, depth + 1});
+      }
+    }
+
     type_infos.push_back(GetApiTypeInfo(type, member_info));
   }
   return type_infos;
@@ -446,6 +475,55 @@ llvm::Optional<lldb_private::CompilerType> ApiContext::GetTypeFromId(
     return llvm::None;
   }
   return it->getValue();
+}
+
+llvm::Optional<api::ExtendedTypeInfo>
+ApiContext::GetApiExtendedTypeInfo(lldb_private::CompilerType type) {
+  auto extended_info = TypeSystemClangExtended::GetExtendedTypeInfo(type);
+  if (!extended_info) {
+    return llvm::None;
+  }
+
+  auto variant_parts =
+      MapToVector<types::VariantPartInfo, api::VariantPartInfo>(
+          extended_info->variant_parts, [&](auto part) {
+            auto discriminator_member =
+                api::FieldInfo()
+                    .SetName(part.discr_member.name)
+                    .SetOffset(part.discr_member.location)
+                    .SetTypeId(GetTypeId(part.discr_member.type));
+
+            auto variants = MapToVector<types::VariantInfo, api::VariantInfo>(
+                part.variants, [&](auto variant) {
+                  return api::VariantInfo()
+                      .SetDiscriminatorValue(variant.discr_value)
+                      .SetMembers(
+                          MapToVector<types::MemberInfo, api::FieldInfo>(
+                              variant.members, [&](auto member) {
+                                return api::FieldInfo()
+                                    .SetName(member.name)
+                                    .SetOffset(member.location)
+                                    .SetTypeId(GetTypeId(member.type));
+                              }));
+                });
+
+            return api::VariantPartInfo()
+                .SetDiscriminatorMember(std::move(discriminator_member))
+                .SetVariants(std::move(variants));
+          });
+
+  auto template_parameters =
+      MapToVector<types::TemplateParameterInfo, api::TemplateParameterInfo>(
+          extended_info->template_parameters, [&](auto parameter) {
+            return api::TemplateParameterInfo()
+                .SetName(parameter.name)
+                .SetTypeId(GetTypeId(parameter.type));
+          });
+
+  return std::move(api::ExtendedTypeInfo()
+                       .SetLanguageId(extended_info->language)
+                       .SetVariantParts(std::move(variant_parts))
+                       .SetTemplateParameters(std::move(template_parameters)));
 }
 
 struct EvalVisitor {
@@ -611,17 +689,20 @@ api::EvaluateExpressionResponse ApiContext::EvaluateExpression(
 }  // namespace symbols_backend
 
 #ifndef NDEBUG
+
+#include "lldb/Utility/LLDBLog.h"
+
 namespace {
 struct Logging {
   Logging() {
-    lldb_private::Log::Initialize();
+    lldb_private::InitializeLldbChannel();
     lldb_private::Log::ListAllLogChannels(llvm::errs());
-    auto stream = std::make_shared<llvm::raw_fd_ostream>(2, false, true);
-    lldb_private::Log::EnableLogChannel(stream, 0, "lldb", {"default"},
+    auto handler = std::make_shared<lldb_private::StreamLogHandler>(2, false);
+    lldb_private::Log::EnableLogChannel(handler, 0, "lldb", {"default"},
                                         llvm::errs());
   }
 };
 
 static Logging l;
-}  // namespace
+} // namespace
 #endif

@@ -6,6 +6,17 @@ const yaml = require('js-yaml');
 const out = process.stdout.write.bind(process.stdout);
 const err = process.stderr.write.bind(process.stderr);
 
+if (process.argv[2] === '--wasi-p1-runner' && process.argv[3]) {
+  out(`module.exports = () => {\n`);
+  out(`  const fs = require('fs');\n`);
+  out(`  const { WASI } = require('node:wasi');\n`);
+  out(`  const wasi = new WASI({ preopens: {}, returnOnExit: false, version: 'preview1' });\n`);
+  out(`  const binary = fs.readFileSync(__dirname + '/${process.argv[3]}');\n`);
+  out(`  WebAssembly.instantiate(binary, wasi.getImportObject()).then(({ instance }) => wasi.start(instance));\n`);
+  out(`}`);
+  process.exit(0);
+}
+
 const inputFiles = process.argv.slice(2);
 
 out(`rule build_dwp\n`);
@@ -14,6 +25,10 @@ out(`  description = Generating dwp file, creating $out\n\n`);
 out(`rule build_wasm\n`);
 out(`  command = $compiler $flags $in -o $out\n`);
 out(`  description = Compiling file '$in' with flags: "$flags"\n\n`);
+out(`rule build_wasip1_runner\n`);
+out(`  command = ${__filename} --wasi-p1-runner $in > $out\n`);
+out(`  description = Generating wasip1 runner, creating $out"\n\n`);
+
 
 for (const specFilePath of inputFiles) {
   const { name, source_file: sourceFile, flags, use_dwo: useDwo } = yaml.load(fs.readFileSync(specFilePath, 'utf8'));
@@ -25,10 +40,20 @@ for (const specFilePath of inputFiles) {
   const sourceFilePath = resolvePath(specFilePath, sourceFile);
   assert(specFilePath, fs.existsSync(sourceFilePath), `File does not exist: ${sourceFile}`);
 
+  const sourceFileIsRust = '.rs' === path.extname(sourceFilePath).toLowerCase();
   const sourceFileIsCpp = ['.cc', '.cpp'].some(extname => extname === path.extname(sourceFilePath).toLowerCase());
 
   for (let i = 0; i < flags.length; i++) {
     const outputFile = testCaseOutputName(sourceFilePath, name, i);
+
+    if (sourceFileIsRust) {
+      out(`build ${outputFile}.wasm: build_wasm ${encodeFilePath(sourceFilePath)}\n`);
+      out(`  compiler = rustc\n`);
+      out(`  flags = ${flags[i].join(' ')}\n\n`);
+      out(`build ${outputFile}.js: build_wasip1_runner ${outputFile}.wasm\n\n`);
+      continue;
+    }
+
     const compiler = `${process.env['EMSDK']}/upstream/emscripten/${sourceFileIsCpp ? 'em++' : 'emcc'}`;
     const compileFlags = flags[i].filter(f => !f.startsWith('-s')).join(' ');
     const linkFlags = ['-sMODULARIZE=1', '-sEXIT_RUNTIME=1', '-sENVIRONMENT=node', ...flags[i]].join(' ');

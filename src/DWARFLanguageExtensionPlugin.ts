@@ -8,19 +8,11 @@ import './Formatters';
 import type { Chrome } from './ExtensionAPI';
 
 import * as Formatters from './CustomFormatters';
+import { getUnmarshalledInterface, UnmarshalInterface } from './embind';
 import { resolveSourcePathToURL } from './PathUtils';
 import type * as SymbolsBackend from './SymbolsBackend';
 import createSymbolsBackend from './SymbolsBackend';
 import type { HostInterface } from './WorkerRPC';
-
-function mapVector<T, ApiT>(vector: SymbolsBackend.Vector<ApiT>, callback: (apiElement: ApiT) => T): T[] {
-  const elements: T[] = [];
-  for (let i = 0; i < vector.size(); ++i) {
-    const element = vector.get(i);
-    elements.push(callback(element));
-  }
-  return elements;
-}
 
 interface ScopeInfo {
   type: 'GLOBAL' | 'LOCAL' | 'PARAMETER';
@@ -30,92 +22,36 @@ interface ScopeInfo {
 
 type LazyFSNode = FS.FSNode & { contents: { cacheLength: () => void, length: number; }; };
 
-function mapEnumerator(apiEnumerator: SymbolsBackend.Enumerator): Formatters.Enumerator {
-  return { typeId: apiEnumerator.typeId, value: apiEnumerator.value, name: apiEnumerator.name };
-}
-
-function mapFieldInfo(apiFieldInfo: SymbolsBackend.FieldInfo): Formatters.FieldInfo {
-  return { typeId: apiFieldInfo.typeId, offset: apiFieldInfo.offset, name: apiFieldInfo.name };
-}
-
 class ModuleInfo {
   readonly fileNameToUrl: Map<string, string>;
   readonly urlToFileName: Map<string, string>;
-  readonly dwarfSymbolsPlugin: SymbolsBackend.DWARFSymbolsPlugin;
+  readonly dwarfSymbolsPlugin: UnmarshalInterface<SymbolsBackend.DWARFSymbolsPlugin>;
 
   constructor(
     readonly symbolsUrl: string, readonly symbolsFileName: string, readonly symbolsDwpFileName: string | undefined,
     readonly backend: SymbolsBackend.Module) {
     this.fileNameToUrl = new Map<string, string>();
     this.urlToFileName = new Map<string, string>();
-    this.dwarfSymbolsPlugin = new backend.DWARFSymbolsPlugin();
+    this.dwarfSymbolsPlugin = getUnmarshalledInterface(new backend.DWARFSymbolsPlugin(), {
+      methods: [
+        'AddRawModule',
+        'RemoveRawModule',
+        'SourceLocationToRawLocation',
+        'RawLocationToSourceLocation',
+        'ListVariablesInScope',
+        'GetFunctionInfo',
+        'GetInlinedFunctionRanges',
+        'GetInlinedCalleesRanges',
+        'GetMappedLines',
+        'EvaluateExpression',
+        'delete',
+      ],
+      enumTypes: [
+        backend.ErrorCode,
+        backend.VariableScope
+      ],
+    });
   }
-
-  stringifyScope(scope: SymbolsBackend.VariableScope): 'GLOBAL' | 'LOCAL' | 'PARAMETER' {
-    switch (scope) {
-      case this.backend.VariableScope.GLOBAL:
-        return 'GLOBAL';
-      case this.backend.VariableScope.LOCAL:
-        return 'LOCAL';
-      case this.backend.VariableScope.PARAMETER:
-        return 'PARAMETER';
-    }
-    throw new Error(`InternalError: Invalid scope ${scope}`);
-  }
-
-  stringifyErrorCode(errorCode: SymbolsBackend.ErrorCode): string {
-    switch (errorCode) {
-      case this.backend.ErrorCode.PROTOCOL_ERROR:
-        return 'ProtocolError:';
-      case this.backend.ErrorCode.MODULE_NOT_FOUND_ERROR:
-        return 'ModuleNotFoundError:';
-      case this.backend.ErrorCode.INTERNAL_ERROR:
-        return 'InternalError';
-      case this.backend.ErrorCode.EVAL_ERROR:
-        return 'EvalError';
-    }
-    throw new Error(`InternalError: Invalid error code ${errorCode}`);
-  }
-}
-
-function createEmbindPool(): {
-  flush(): void,
-  manage<T extends SymbolsBackend.EmbindObject | undefined>(object: T): T,
-  unmanage<T extends SymbolsBackend.EmbindObject>(object: T): boolean,
-} {
-  class EmbindObjectPool {
-    private objectPool: SymbolsBackend.EmbindObject[] = [];
-
-    flush(): void {
-      for (const object of this.objectPool.reverse()) {
-        object.delete();
-      }
-      this.objectPool = [];
-    }
-
-    manage<T extends SymbolsBackend.EmbindObject | undefined>(object: T): T {
-      if (typeof object !== 'undefined') {
-        this.objectPool.push(object);
-      }
-      return object;
-    }
-
-    unmanage<T extends SymbolsBackend.EmbindObject>(object: T): boolean {
-      const index = this.objectPool.indexOf(object);
-      if (index > -1) {
-        this.objectPool.splice(index, 1);
-        object.delete();
-        return true;
-      }
-      return false;
-    }
-  }
-
-  const pool = new EmbindObjectPool();
-  const manage = pool.manage.bind(pool);
-  const unmanage = pool.unmanage.bind(pool);
-  const flush = pool.flush.bind(pool);
-  return { manage, unmanage, flush };
 }
 
 // Cache the underlying WebAssembly module after the first instantiation
@@ -152,73 +88,68 @@ export class DWARFLanguageExtensionPlugin implements Chrome.DevTools.LanguageExt
   constructor(readonly resourceLoader: ResourceLoader, readonly hostInterface: HostInterface) { }
 
   private async newModuleInfo(rawModuleId: string, symbolsHint: string, rawModule: RawModule): Promise<ModuleInfo> {
-    const { flush, manage } = createEmbindPool();
-    try {
-      const rawModuleURL = new URL(rawModule.url);
-      const symbolsURL = symbolsHint ? resolveSourcePathToURL(symbolsHint, rawModuleURL) : rawModuleURL;
+    const rawModuleURL = new URL(rawModule.url);
+    const symbolsURL = symbolsHint ? resolveSourcePathToURL(symbolsHint, rawModuleURL) : rawModuleURL;
 
-      const instantiateWasmWrapper =
-        (imports: Emscripten.WebAssemblyImports,
-          callback: (module: WebAssembly.Module) => void): Emscripten.WebAssemblyExports => {
-          // Emscripten type definitions are incorrect, we're getting passed a WebAssembly.Imports object here.
-          return instantiateWasm(imports as unknown as WebAssembly.Imports, callback, this.resourceLoader);
-        };
-      const backend = await createSymbolsBackend({ instantiateWasm: instantiateWasmWrapper });
-      const { symbolsFileName, symbolsDwpFileName } =
-        await this.resourceLoader.loadSymbols(rawModuleId, rawModule, symbolsURL, backend.FS, this.hostInterface);
-      const moduleInfo = new ModuleInfo(symbolsURL.href, symbolsFileName, symbolsDwpFileName, backend);
+    const instantiateWasmWrapper =
+      (imports: Emscripten.WebAssemblyImports,
+        callback: (module: WebAssembly.Module) => void): Emscripten.WebAssemblyExports => {
+        // Emscripten type definitions are incorrect, we're getting passed a WebAssembly.Imports object here.
+        return instantiateWasm(imports as unknown as WebAssembly.Imports, callback, this.resourceLoader);
+      };
+    const backend = await createSymbolsBackend({ instantiateWasm: instantiateWasmWrapper });
+    const { symbolsFileName, symbolsDwpFileName } =
+      await this.resourceLoader.loadSymbols(rawModuleId, rawModule, symbolsURL, backend.FS, this.hostInterface);
+    const moduleInfo = new ModuleInfo(symbolsURL.href, symbolsFileName, symbolsDwpFileName, backend);
 
-      const addRawModuleResponse = manage(moduleInfo.dwarfSymbolsPlugin.AddRawModule(rawModuleId, symbolsFileName));
-      mapVector(manage(addRawModuleResponse.sources), fileName => {
-        const fileURL = resolveSourcePathToURL(fileName, symbolsURL);
-        moduleInfo.fileNameToUrl.set(fileName, fileURL.href);
-        moduleInfo.urlToFileName.set(fileURL.href, fileName);
-      });
+    const { sources, dwos } = moduleInfo.dwarfSymbolsPlugin.AddRawModule(rawModuleId, symbolsFileName);
+    for (const fileName of sources) {
+      const fileURL = resolveSourcePathToURL(fileName, symbolsURL);
+      moduleInfo.fileNameToUrl.set(fileName, fileURL.href);
+      moduleInfo.urlToFileName.set(fileURL.href, fileName);
+    };
 
-      for (const dwoFile of mapVector(manage(addRawModuleResponse.dwos), dwo => dwo)) {
-        const absolutePath = dwoFile.startsWith('/') ? dwoFile : '/' + dwoFile;
-        const pathSplit = absolutePath.split('/');
-        const fileName = pathSplit.pop() as string;
-        const parentDirectory = pathSplit.join('/');
+    for (const dwoFile of dwos) {
+      const absolutePath = dwoFile.startsWith('/') ? dwoFile : '/' + dwoFile;
+      const pathSplit = absolutePath.split('/');
+      const fileName = pathSplit.pop() as string;
+      const parentDirectory = pathSplit.join('/');
 
-        const dwoURL = new URL(dwoFile, symbolsURL).href;
-        const dwoResponse = await fetch(dwoURL, { mode: 'no-cors' })
-          .catch((e: Error) => ({ ok: false, status: -1, statusText: e.message } as const));
+      const dwoURL = new URL(dwoFile, symbolsURL).href;
+      const dwoResponse = await fetch(dwoURL, { mode: 'no-cors' })
+        .catch((e: Error) => ({ ok: false, status: -1, statusText: e.message } as const));
 
-        if (dwoResponse.ok) {
-          const dwoData = await dwoResponse.arrayBuffer();
-          void this.hostInterface.reportResourceLoad(dwoURL, { success: true, size: dwoData.byteLength });
+      if (dwoResponse.ok) {
+        const dwoData = await dwoResponse.arrayBuffer();
+        void this.hostInterface.reportResourceLoad(dwoURL, { success: true, size: dwoData.byteLength });
 
-          // Sometimes these stick around.
-          try {
-            backend.FS.unlink(absolutePath);
-          } catch {
-          }
-          // Ensure directory exists
-          if (parentDirectory.length > 1) {
-            // TypeScript doesn't know about createPath
-            // @ts-expect-error doesn't exit on types
-            backend.FS.createPath('/', parentDirectory.substring(1), true, true);
-          }
-
-          backend.FS.createDataFile(
-            parentDirectory,
-            fileName,
-            new Uint8Array(dwoData),
-            true /* canRead */,
-            false /* canWrite */,
-            true /* canOwn */,
-          );
-        } else {
-          const dwoError = dwoResponse.statusText || `status code ${dwoResponse.status}`;
-          void this.hostInterface.reportResourceLoad(dwoURL, { success: false, errorMessage: `Failed to fetch dwo file: ${dwoError}` });
+        // Sometimes these stick around.
+        try {
+          backend.FS.unlink(absolutePath);
+        } catch {
         }
-      }
+        // Ensure directory exists
+        if (parentDirectory.length > 1) {
+          // TypeScript doesn't know about createPath
+          // @ts-expect-error doesn't exit on types
+          backend.FS.createPath('/', parentDirectory.substring(1), true, true);
+        }
 
-      return moduleInfo;
-    } finally {
-      flush();
+        backend.FS.createDataFile(
+          parentDirectory,
+          fileName,
+          new Uint8Array(dwoData),
+          true /* canRead */,
+          false /* canWrite */,
+          true /* canOwn */,
+        );
+      } else {
+        const dwoError = dwoResponse.statusText || `status code ${dwoResponse.status}`;
+        void this.hostInterface.reportResourceLoad(dwoURL, { success: false, errorMessage: `Failed to fetch dwo file: ${dwoError}` });
+      }
     }
+
+    return moduleInfo;
   }
 
   async addRawModule(rawModuleId: string, symbolsUrl: string, rawModule: RawModule): Promise<string[]> {
@@ -266,57 +197,39 @@ export class DWARFLanguageExtensionPlugin implements Chrome.DevTools.LanguageExt
 
   async sourceLocationToRawLocation(sourceLocation: Chrome.DevTools.SourceLocation):
     Promise<Chrome.DevTools.RawLocationRange[]> {
-    const { flush, manage } = createEmbindPool();
     const moduleInfo = await this.getModuleInfo(sourceLocation.rawModuleId);
     const sourceFile = moduleInfo.urlToFileName.get(sourceLocation.sourceFileURL);
     if (!sourceFile) {
       throw new Error(`InternalError: Unknown URL ${sourceLocation.sourceFileURL}`);
     }
-    try {
-      const rawLocations = manage(moduleInfo.dwarfSymbolsPlugin.SourceLocationToRawLocation(
-        sourceLocation.rawModuleId, sourceFile, sourceLocation.lineNumber, sourceLocation.columnNumber));
-      const error = manage(rawLocations.error);
-      if (error) {
-        throw new Error(`${moduleInfo.stringifyErrorCode(error.code)}: ${error.message}`);
-      }
-      const locations = mapVector(manage(rawLocations.rawLocationRanges), rawLocation => {
-        const { rawModuleId, startOffset, endOffset } = manage(rawLocation);
-        return { rawModuleId, startOffset, endOffset };
-      });
-      return locations;
-    } finally {
-      flush();
+    const { rawLocationRanges, error } = moduleInfo.dwarfSymbolsPlugin.SourceLocationToRawLocation(
+      sourceLocation.rawModuleId, sourceFile, sourceLocation.lineNumber, sourceLocation.columnNumber);
+    if (error) {
+      throw new Error(`${error.code}: ${error.message}`);
     }
+    return rawLocationRanges;
   }
 
   async rawLocationToSourceLocation(rawLocation: Chrome.DevTools.RawLocation):
     Promise<Chrome.DevTools.SourceLocation[]> {
-    const { flush, manage } = createEmbindPool();
     const moduleInfo = await this.getModuleInfo(rawLocation.rawModuleId);
-    try {
-      const sourceLocations = moduleInfo.dwarfSymbolsPlugin.RawLocationToSourceLocation(
-        rawLocation.rawModuleId, rawLocation.codeOffset, rawLocation.inlineFrameIndex || 0);
-      const error = manage(sourceLocations.error);
-      if (error) {
-        throw new Error(`${moduleInfo.stringifyErrorCode(error.code)}: ${error.message}`);
-      }
-      const locations = mapVector(manage(sourceLocations.sourceLocation), sourceLocation => {
-        const sourceFileURL = moduleInfo.fileNameToUrl.get(sourceLocation.sourceFile);
-        if (!sourceFileURL) {
-          throw new Error(`InternalError: Unknown source file ${sourceLocation.sourceFile}`);
-        }
-        const { rawModuleId, lineNumber, columnNumber } = manage(sourceLocation);
-        return {
-          rawModuleId,
-          sourceFileURL,
-          lineNumber,
-          columnNumber,
-        };
-      });
-      return locations;
-    } finally {
-      flush();
+    const { sourceLocation, error } = moduleInfo.dwarfSymbolsPlugin.RawLocationToSourceLocation(
+      rawLocation.rawModuleId, rawLocation.codeOffset, rawLocation.inlineFrameIndex || 0);
+    if (error) {
+      throw new Error(`${error.code}: ${error.message}`);
     }
+    return sourceLocation.map(({ rawModuleId, sourceFile, lineNumber, columnNumber }) => {
+      const sourceFileURL = moduleInfo.fileNameToUrl.get(sourceFile);
+      if (!sourceFileURL) {
+        throw new Error(`InternalError: Unknown source file ${sourceFile}`);
+      }
+      return {
+        rawModuleId,
+        sourceFileURL,
+        lineNumber,
+        columnNumber,
+      };
+    });
   }
 
   async getScopeInfo(type: string): Promise<ScopeInfo> {
@@ -344,211 +257,104 @@ export class DWARFLanguageExtensionPlugin implements Chrome.DevTools.LanguageExt
   }
 
   async listVariablesInScope(rawLocation: Chrome.DevTools.RawLocation): Promise<Chrome.DevTools.Variable[]> {
-    const { flush, manage } = createEmbindPool();
     const moduleInfo = await this.getModuleInfo(rawLocation.rawModuleId);
-    try {
-      const variables = manage(moduleInfo.dwarfSymbolsPlugin.ListVariablesInScope(
-        rawLocation.rawModuleId, rawLocation.codeOffset, rawLocation.inlineFrameIndex || 0));
-      const error = manage(variables.error);
-      if (error) {
-        throw new Error(`${moduleInfo.stringifyErrorCode(error.code)}: ${error.message}`);
-      }
-      const apiVariables = mapVector(manage(variables.variable), variable => {
-        const { scope, name, type } = manage(variable);
-        return { scope: moduleInfo.stringifyScope(scope), name, type, nestedName: name.split('::') };
-      });
-      return apiVariables;
-    } finally {
-      flush();
+    const { variable, error } = moduleInfo.dwarfSymbolsPlugin.ListVariablesInScope(
+      rawLocation.rawModuleId, rawLocation.codeOffset, rawLocation.inlineFrameIndex || 0);
+    if (error) {
+      throw new Error(`${error.code}: ${error.message}`);
     }
+    return variable.map(({ scope, name, type }) => {
+      return { scope, name, type, nestedName: name.split('::') };
+    });
   }
 
   async getFunctionInfo(rawLocation: Chrome.DevTools.RawLocation):
     Promise<{ frames: Chrome.DevTools.FunctionInfo[], missingSymbolFiles: string[]; }> {
-    const { flush, manage } = createEmbindPool();
     const moduleInfo = await this.getModuleInfo(rawLocation.rawModuleId);
-    try {
-      const functionInfo =
-        manage(moduleInfo.dwarfSymbolsPlugin.GetFunctionInfo(rawLocation.rawModuleId, rawLocation.codeOffset));
-      const error = manage(functionInfo.error);
-      if (error) {
-        throw new Error(`${moduleInfo.stringifyErrorCode(error.code)}: ${error.message}`);
-      }
-      const apiFunctionInfos = mapVector(manage(functionInfo.functionNames), functionName => {
-        return { name: functionName };
-      });
-      let apiMissingSymbolFiles = mapVector(manage(functionInfo.missingSymbolFiles), x => x);
-      if (apiMissingSymbolFiles.length && this.resourceLoader.possiblyMissingSymbols) {
-        apiMissingSymbolFiles = apiMissingSymbolFiles.concat(this.resourceLoader.possiblyMissingSymbols);
-      }
-
-      return {
-        frames: apiFunctionInfos,
-        missingSymbolFiles: apiMissingSymbolFiles.map(x => new URL(x, moduleInfo.symbolsUrl).href)
-      };
-    } finally {
-      flush();
+    const { functionNames, missingSymbolFiles, error } =
+      moduleInfo.dwarfSymbolsPlugin.GetFunctionInfo(rawLocation.rawModuleId, rawLocation.codeOffset);
+    if (error) {
+      throw new Error(`${error.code}: ${error.message}`);
     }
+    return {
+      frames: functionNames.map(name => ({ name })),
+      missingSymbolFiles: missingSymbolFiles.length > 0 && this.resourceLoader.possiblyMissingSymbols
+        ? missingSymbolFiles.concat(this.resourceLoader.possiblyMissingSymbols).map(s => new URL(s, moduleInfo.symbolsUrl).href)
+        : []
+    };
   }
 
   async getInlinedFunctionRanges(rawLocation: Chrome.DevTools.RawLocation):
     Promise<Chrome.DevTools.RawLocationRange[]> {
-    const { flush, manage } = createEmbindPool();
     const moduleInfo = await this.getModuleInfo(rawLocation.rawModuleId);
-    try {
-      const rawLocations = manage(
-        moduleInfo.dwarfSymbolsPlugin.GetInlinedFunctionRanges(rawLocation.rawModuleId, rawLocation.codeOffset));
-      const error = manage(rawLocations.error);
-      if (error) {
-        throw new Error(`${moduleInfo.stringifyErrorCode(error.code)}: ${error.message}`);
-      }
-      const locations = mapVector(manage(rawLocations.rawLocationRanges), rawLocation => {
-        const { rawModuleId, startOffset, endOffset } = manage(rawLocation);
-        return { rawModuleId, startOffset, endOffset };
-      });
-      return locations;
-    } finally {
-      flush();
+    const { rawLocationRanges, error } =
+      moduleInfo.dwarfSymbolsPlugin.GetInlinedFunctionRanges(rawLocation.rawModuleId, rawLocation.codeOffset);
+    if (error) {
+      throw new Error(`${error.code}: ${error.message}`);
     }
+    return rawLocationRanges;
   }
 
   async getInlinedCalleesRanges(rawLocation: Chrome.DevTools.RawLocation): Promise<Chrome.DevTools.RawLocationRange[]> {
-    const { flush, manage } = createEmbindPool();
     const moduleInfo = await this.getModuleInfo(rawLocation.rawModuleId);
-    try {
-      const rawLocations = manage(
-        moduleInfo.dwarfSymbolsPlugin.GetInlinedCalleesRanges(rawLocation.rawModuleId, rawLocation.codeOffset));
-      const error = manage(rawLocations.error);
-      if (error) {
-        throw new Error(`${moduleInfo.stringifyErrorCode(error.code)}: ${error.message}`);
-      }
-      const locations = mapVector(manage(rawLocations.rawLocationRanges), rawLocation => {
-        const { rawModuleId, startOffset, endOffset } = manage(rawLocation);
-        return { rawModuleId, startOffset, endOffset };
-      });
-      return locations;
-    } finally {
-      flush();
+    const { rawLocationRanges, error } =
+      moduleInfo.dwarfSymbolsPlugin.GetInlinedCalleesRanges(rawLocation.rawModuleId, rawLocation.codeOffset);
+    if (error) {
+      throw new Error(`${error.code}: ${error.message}`);
     }
-  }
-
-  async getValueInfo(expression: string, context: Chrome.DevTools.RawLocation, stopId: unknown): Promise<{
-    typeInfos: Formatters.TypeInfo[],
-    root: Formatters.TypeInfo,
-    location?: number,
-    data?: number[],
-    displayValue?: string,
-    memoryAddress?: number,
-  } | null> {
-    const { manage, unmanage, flush } = createEmbindPool();
-    const moduleInfo = await this.getModuleInfo(context.rawModuleId);
-    try {
-      const apiRawLocation = manage(new moduleInfo.backend.RawLocation());
-      apiRawLocation.rawModuleId = context.rawModuleId;
-      apiRawLocation.codeOffset = context.codeOffset;
-      apiRawLocation.inlineFrameIndex = context.inlineFrameIndex || 0;
-
-      const wasm = new Formatters.HostWasmInterface(this.hostInterface, stopId);
-      const proxy = new Formatters.DebuggerProxy(wasm, moduleInfo.backend);
-      const typeInfoResult =
-        manage(moduleInfo.dwarfSymbolsPlugin.EvaluateExpression(apiRawLocation, expression, proxy));
-      const error = manage(typeInfoResult.error);
-      if (error) {
-        if (error.code === moduleInfo.backend.ErrorCode.MODULE_NOT_FOUND_ERROR) {
-          // Let's not throw when the module gets unloaded - that is quite common path that
-          // we hit when the source-scope pane still keeps asynchronously updating while we
-          // unload the wasm module.
-          return null;
-        }
-        // TODO(crbug.com/1271147) Instead of throwing, we whould create an AST error node with the message
-        // so that it is properly surfaced to the user. This should then make the special handling of
-        // MODULE_NOT_FOUND_ERROR unnecessary.
-        throw new Error(`${moduleInfo.stringifyErrorCode(error.code)}: ${error.message}`);
-      }
-
-      const typeInfos = mapVector(manage(typeInfoResult.typeInfos), typeInfo => fromApiTypeInfo(manage(typeInfo)));
-      const root = fromApiTypeInfo(manage(typeInfoResult.root));
-      const { location, displayValue, memoryAddress } = typeInfoResult;
-      const data = typeInfoResult.data ? mapVector(manage(typeInfoResult.data), n => n) : undefined;
-      return { typeInfos, root, location, data, displayValue, memoryAddress };
-
-      function fromApiTypeInfo(apiTypeInfo: SymbolsBackend.TypeInfo): Formatters.TypeInfo {
-        const apiMembers = manage(apiTypeInfo.members);
-        const members = mapVector(apiMembers, fieldInfo => mapFieldInfo(manage(fieldInfo)));
-        const apiEnumerators = manage(apiTypeInfo.enumerators);
-        const enumerators = mapVector(apiEnumerators, enumerator => mapEnumerator(manage(enumerator)));
-        unmanage(apiEnumerators);
-        const typeNames = mapVector(manage(apiTypeInfo.typeNames), e => e);
-        unmanage(apiMembers);
-        const { typeId, size, arraySize, alignment, canExpand, isPointer, hasValue } = apiTypeInfo;
-        const formatter = Formatters.CustomFormatters.get({
-          typeNames,
-          typeId,
-          size,
-          alignment,
-          isPointer,
-          canExpand,
-          arraySize: arraySize ?? 0,
-          hasValue,
-          members,
-          enumerators,
-        });
-        return {
-          typeNames,
-          isPointer,
-          typeId,
-          size,
-          alignment,
-          canExpand: canExpand && !formatter,
-          arraySize: arraySize ?? 0,
-          hasValue: hasValue || Boolean(formatter),
-          members,
-          enumerators,
-        };
-      }
-    } finally {
-      flush();
-    }
+    return rawLocationRanges;
   }
 
   async getMappedLines(rawModuleId: string, sourceFileURL: string): Promise<number[]> {
-    const { flush, manage } = createEmbindPool();
     const moduleInfo = await this.getModuleInfo(rawModuleId);
     const sourceFile = moduleInfo.urlToFileName.get(sourceFileURL);
     if (!sourceFile) {
       throw new Error(`InternalError: Unknown URL ${sourceFileURL}`);
     }
-
-    try {
-      const mappedLines = manage(moduleInfo.dwarfSymbolsPlugin.GetMappedLines(rawModuleId, sourceFile));
-      const error = manage(mappedLines.error);
-      if (error) {
-        throw new Error(`${moduleInfo.stringifyErrorCode(error.code)}: ${error.message}`);
-      }
-      const lines = mapVector(manage(mappedLines.MappedLines), l => l);
-      return lines;
-    } finally {
-      flush();
+    const { mappedLines, error } = moduleInfo.dwarfSymbolsPlugin.GetMappedLines(rawModuleId, sourceFile);
+    if (error) {
+      throw new Error(`${error.code}: ${error.message}`);
     }
+    return mappedLines;
   }
 
-  async evaluate(expression: string, context: SymbolsBackend.RawLocation, stopId: unknown):
+  async evaluate(expression: string, context: Chrome.DevTools.RawLocation, stopId: unknown):
     Promise<Chrome.DevTools.RemoteObject | Chrome.DevTools.ForeignObject | null> {
-    const valueInfo = await this.getValueInfo(expression, context, stopId);
-    if (!valueInfo) {
-      return null;
-    }
+    const moduleInfo = await this.getModuleInfo(context.rawModuleId);
+    const apiRawLocation = new moduleInfo.backend.RawLocation();
+    try {
+      apiRawLocation.rawModuleId = context.rawModuleId;
+      apiRawLocation.codeOffset = context.codeOffset;
+      apiRawLocation.inlineFrameIndex = context.inlineFrameIndex || 0;
 
-    const wasm = new Formatters.HostWasmInterface(this.hostInterface, stopId);
-    const cxxObject = await Formatters.CXXValue.create(this.lazyObjects, wasm, wasm.view, valueInfo);
-    if (!cxxObject) {
-      return {
-        type: 'undefined' as Chrome.DevTools.RemoteObjectType,
-        hasChildren: false,
-        description: '<optimized out>',
-      };
+      const wasm = new Formatters.HostWasmInterface(this.hostInterface, stopId);
+      const debuggerProxy = new Formatters.DebuggerProxy(wasm, moduleInfo.backend);
+
+      const { typeInfos, root, displayValue, location, memoryAddress, data, error } =
+        moduleInfo.dwarfSymbolsPlugin.EvaluateExpression(apiRawLocation, expression, debuggerProxy);
+
+      if (error) {
+        if (error.code === 'MODULE_NOT_FOUND_ERROR') {
+          // Let's not throw when the module gets unloaded - that is quite common path that
+          // we hit when the source-scope pane still keeps asynchronously updating while we
+          // unload the wasm module.
+          return {
+            type: 'undefined' as Chrome.DevTools.RemoteObjectType,
+            hasChildren: false,
+            description: '<optimized out>',
+          };
+        }
+        // TODO(crbug.com/1271147) Instead of throwing, we whould create an AST error node with the message
+        // so that it is properly surfaced to the user. This should then make the special handling of
+        // MODULE_NOT_FOUND_ERROR unnecessary.
+        throw new Error(`${error.code}: ${error.message}`);
+      }
+
+      const value = { typeInfos, root, location, data, displayValue, memoryAddress };
+      return Formatters.CXXValue.create(this.lazyObjects, wasm, wasm.view, value).asRemoteObject();
+    } finally {
+      apiRawLocation.delete();
     }
-    return await cxxObject.asRemoteObject();
   }
 
   async getProperties(objectId: Chrome.DevTools.RemoteObjectId): Promise<Chrome.DevTools.PropertyDescriptor[]> {

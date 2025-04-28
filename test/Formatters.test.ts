@@ -6,7 +6,7 @@
 import assert from 'assert';
 import { describe, it } from 'node:test';
 
-import { CustomFormatters, type TypeInfo } from '../src/CustomFormatters';
+import { CustomFormatters, ExtendedTypeInfo, type TypeInfo } from '../src/CustomFormatters';
 import * as Formatters from '../src/Formatters';
 import TestValue from '../test-utils/TestValue';
 import TestWasmInterface from '../test-utils/TestWasmInterface';
@@ -248,6 +248,159 @@ describe('Formatters', () => {
       linearMemoryAddress: undefined,
     });
   });
+
+  describe('Rust', () => {
+
+    it('formatRustSumType', () => {
+      const wasm = new TestWasmInterface();
+      const discriminator = new Uint16Array(1);
+      const value = TestValue.fromType('test::Animal')
+        .withVariants(
+          TestValue.fromType('u16', discriminator),
+          [1, 'Dog', TestValue.fromType('test::Animal::Dog')],
+          [2, 'Cat', TestValue.fromType('test::Animal::Cat')]);
+
+      discriminator[0] = 1;
+      assert.deepEqual(
+        Formatters.formatRustSumType(wasm, value),
+        { 'Dog': TestValue.fromType('test::Animal::Dog', undefined, 2) }
+      );
+
+      discriminator[0] = 2;
+      assert.deepEqual(
+        Formatters.formatRustSumType(wasm, value),
+        { 'Cat': TestValue.fromType('test::Animal::Cat', undefined, 2) }
+      );
+    });
+
+    it('formatRustTuple', () => {
+      const wasm = new TestWasmInterface();
+      const value = TestValue.fromMembers('(i32, f32)', {
+        __0: TestValue.fromInt32(2),
+        __1: TestValue.fromFloat32(3.5)
+      });
+
+      assert.deepEqual(
+        Formatters.formatRustTuple(wasm, value),
+        [
+          TestValue.fromInt32(2),
+          TestValue.fromFloat32(3.5),
+        ]
+      );
+    });
+
+    it('formatRustArraySlice', async () => {
+      const wasm = new TestWasmInterface();
+      const value = TestValue.fromMembers('&[i32]', {
+        length: TestValue.fromInt32(3),
+        data_ptr: TestValue.pointerTo([
+          TestValue.fromType('i32', new Uint32Array([1])),
+          TestValue.fromType('i32', new Uint32Array([2])),
+          TestValue.fromType('i32', new Uint32Array([3])),
+        ])
+      });
+
+      assert.deepEqual(
+        Formatters.formatRustArraySlice(wasm, value),
+        [
+          TestValue.fromType('i32', new Uint32Array([1])),
+          TestValue.fromType('i32', new Uint32Array([2])),
+          TestValue.fromType('i32', new Uint32Array([3])),
+        ]
+      );
+    });
+
+    it('formatRustVector', async () => {
+      const wasm = new TestWasmInterface();
+      const value = TestValue.fromMembers('alloc::vec::Vec<test::Type>', {
+        len: TestValue.fromInt32(3),
+        buf: TestValue.fromMembers('_', {
+          inner: TestValue.fromMembers('_', {
+            ptr: TestValue.fromUint32(0, 'i32')
+          })
+        })
+      }).withTemplateParameters('test::Type');
+
+      assert.deepEqual(
+        Formatters.formatRustVector(wasm, value),
+        [
+          TestValue.fromType('test::Type'),
+          TestValue.fromType('test::Type'),
+          TestValue.fromType('test::Type'),
+        ]
+      );
+    });
+
+    it('formatRustStringSlice', () => {
+      const wasm = new TestWasmInterface();
+      const value = TestValue.fromMembers('&str', {
+        length: TestValue.fromInt32(6),
+        'data_ptr': TestValue.fromUint32(10, 'unsigned char *')
+      });
+
+      const chars = new TextEncoder().encode('Hello World');
+      wasm.writeMemory(8, chars);
+
+      assert.deepEqual(
+        Formatters.formatRustStringSlice(wasm, value),
+        {
+          size: 6,
+          string: '"llo Wo"',
+          chars: chars.slice(2, 8),
+        }
+      );
+    });
+
+    it('formatRustString', () => {
+      const wasm = new TestWasmInterface();
+      const value = TestValue.fromMembers('alloc::string::String', {
+        vec: TestValue.fromMembers('_', {
+          len: TestValue.fromInt32(11),
+          buf: TestValue.fromMembers('_', {
+            inner: TestValue.fromMembers('_', {
+              ptr: TestValue.fromUint32(8, 'unsigned char *')
+            })
+          })
+        })
+      });
+
+      const chars = new TextEncoder().encode('Hello World');
+      wasm.writeMemory(8, chars);
+
+      assert.deepEqual(
+        Formatters.formatRustString(wasm, value),
+        {
+          size: 11,
+          string: '"Hello World"',
+          chars,
+        }
+      );
+    });
+
+    it('formatRustRcPointer', () => {
+      const wasm = new TestWasmInterface();
+      const value = TestValue.fromMembers('alloc::rc::Rc<test::Type>', {
+        ptr: TestValue.fromMembers('_', {
+          pointer: TestValue.pointerTo(
+            TestValue.fromMembers('_ *', {
+              value: TestValue.fromType('test::Type', undefined, 0x1234),
+              strong: TestValue.fromUint32(1),
+              weak: TestValue.fromUint32(3),
+            }),
+          ),
+        })
+      });
+
+      assert.deepEqual(
+        Formatters.formatRustRcPointer(wasm, value),
+        {
+          '0x1234': TestValue.fromType('test::Type', undefined, 0x1234),
+          strong_count: 1,
+          weak_count: 2,
+        }
+      );
+    });
+  });
 });
 
 describe('CustomFormatters', () => {
@@ -260,71 +413,125 @@ describe('CustomFormatters', () => {
         return {
           typeNames: [typeName],
           typeId: typeName,
-          members: [],
           alignment: 0,
-          arraySize: 0,
           size: 0,
-          isPointer: Boolean(typeName.match(/^.+\*$/) || typeName.match(/^.+&$/)),
           canExpand: false,
           hasValue: false,
+          arraySize: 0,
+          isPointer: Boolean(typeName.match(/^.+\*$/) || typeName.match(/^.+&$/)),
+          members: [],
+          enumerators: [],
           ...typeProperties,
         };
       };
 
-      assert.deepEqual(CustomFormatters.get(type('std::__2::string'))?.format, Formatters.formatLibCXX8String);
-      assert.deepEqual(
+      assert.strictEqual(CustomFormatters.get(type('std::__2::string'))?.format, Formatters.formatLibCXX8String);
+      assert.strictEqual(
         CustomFormatters
           .get(type('std::__2::basic_string<char, std::__2::char_traits<char>, std::__2::allocator<char> >'))
           ?.format,
         Formatters.formatLibCXX8String);
-      assert.deepEqual(CustomFormatters.get(type('std::__2::u8string'))?.format, Formatters.formatLibCXX8String);
-      assert.deepEqual(
+      assert.strictEqual(CustomFormatters.get(type('std::__2::u8string'))?.format, Formatters.formatLibCXX8String);
+      assert.strictEqual(
         CustomFormatters
           .get(type(
             'std::__2::basic_string<char8_t, std::__2::char_traits<char8_t>, std::__2::allocator<char8_t> >'))
           ?.format,
         Formatters.formatLibCXX8String);
 
-      assert.deepEqual(CustomFormatters.get(type('std::__2::u16string'))?.format, Formatters.formatLibCXX16String);
-      assert.deepEqual(
+      assert.strictEqual(CustomFormatters.get(type('std::__2::u16string'))?.format, Formatters.formatLibCXX16String);
+      assert.strictEqual(
         CustomFormatters
           .get(type(
             'std::__2::basic_string<char16_t, std::__2::char_traits<char16_t>, std::__2::allocator<char16_t> >'))
           ?.format,
         Formatters.formatLibCXX16String);
 
-      assert.deepEqual(CustomFormatters.get(type('std::__2::wstring'))?.format, Formatters.formatLibCXX32String);
-      assert.deepEqual(
+      assert.strictEqual(CustomFormatters.get(type('std::__2::wstring'))?.format, Formatters.formatLibCXX32String);
+      assert.strictEqual(
         CustomFormatters
           .get(type(
             'std::__2::basic_string<wchar_t, std::__2::char_traits<wchar_t>, std::__2::allocator<wchar_t> >'))
           ?.format,
         Formatters.formatLibCXX32String);
-      assert.deepEqual(CustomFormatters.get(type('std::__2::u32string'))?.format, Formatters.formatLibCXX32String);
-      assert.deepEqual(
+      assert.strictEqual(CustomFormatters.get(type('std::__2::u32string'))?.format, Formatters.formatLibCXX32String);
+      assert.strictEqual(
         CustomFormatters
           .get(type(
             'std::__2::basic_string<char32_t, std::__2::char_traits<char32_t>, std::__2::allocator<char32_t> >'))
           ?.format,
         Formatters.formatLibCXX32String);
 
-      assert.deepEqual(CustomFormatters.get(type('char *'))?.format, Formatters.formatCString);
-      assert.deepEqual(CustomFormatters.get(type('char8_t *'))?.format, Formatters.formatCString);
-      assert.deepEqual(CustomFormatters.get(type('char16_t *'))?.format, Formatters.formatU16CString);
-      assert.deepEqual(CustomFormatters.get(type('wchar_t *'))?.format, Formatters.formatCWString);
-      assert.deepEqual(CustomFormatters.get(type('char32_t *'))?.format, Formatters.formatCWString);
-      assert.deepEqual(
+      assert.strictEqual(CustomFormatters.get(type('char *'))?.format, Formatters.formatCString);
+      assert.strictEqual(CustomFormatters.get(type('char8_t *'))?.format, Formatters.formatCString);
+      assert.strictEqual(CustomFormatters.get(type('char16_t *'))?.format, Formatters.formatU16CString);
+      assert.strictEqual(CustomFormatters.get(type('wchar_t *'))?.format, Formatters.formatCWString);
+      assert.strictEqual(CustomFormatters.get(type('char32_t *'))?.format, Formatters.formatCWString);
+      assert.strictEqual(
         CustomFormatters.get(type('int (*)()', { isPointer: true }))?.format, Formatters.formatPointerOrReference);
 
-      assert.deepEqual(CustomFormatters.get(type('std::vector<int>'))?.format, Formatters.formatVector);
-      assert.deepEqual(CustomFormatters.get(type('std::vector<const float>'))?.format, Formatters.formatVector);
+      assert.strictEqual(CustomFormatters.get(type('std::vector<int>'))?.format, Formatters.formatVector);
+      assert.strictEqual(CustomFormatters.get(type('std::vector<const float>'))?.format, Formatters.formatVector);
 
-      assert.deepEqual(CustomFormatters.get(type('int *'))?.format, Formatters.formatPointerOrReference);
-      assert.deepEqual(CustomFormatters.get(type('int &'))?.format, Formatters.formatPointerOrReference);
-      assert.deepEqual(CustomFormatters.get(type('int[]'))?.format, Formatters.formatDynamicArray);
+      assert.strictEqual(CustomFormatters.get(type('int *'))?.format, Formatters.formatPointerOrReference);
+      assert.strictEqual(CustomFormatters.get(type('int &'))?.format, Formatters.formatPointerOrReference);
+      assert.strictEqual(CustomFormatters.get(type('int[]'))?.format, Formatters.formatDynamicArray);
 
-      assert.deepEqual(CustomFormatters.get(type('unsigned __int128'))?.format, Formatters.formatUInt128);
-      assert.deepEqual(CustomFormatters.get(type('__int128'))?.format, Formatters.formatInt128);
+      assert.strictEqual(CustomFormatters.get(type('unsigned __int128'))?.format, Formatters.formatUInt128);
+      assert.strictEqual(CustomFormatters.get(type('__int128'))?.format, Formatters.formatInt128);
     });
   }
+
+  it(`looks up formatters correctly for rust types`, () => {
+    const type = (typeName: string, typeProperties: Partial<TypeInfo> = {}, extendedInfo: Partial<ExtendedTypeInfo> = {}): TypeInfo => {
+      return {
+        typeNames: [typeName],
+        typeId: typeName,
+        alignment: 0,
+        size: 0,
+        canExpand: false,
+        hasValue: false,
+        arraySize: 0,
+        isPointer: Boolean(typeName.match(/^.+\*$/) || typeName.match(/^.+&$/)),
+        members: [],
+        enumerators: [],
+        ...typeProperties,
+        extendedInfo: {
+          languageId: Formatters.LanguageId.Rust,
+          variantParts: [],
+          templateParameters: [],
+          ...extendedInfo
+        },
+      };
+    };
+
+    assert.strictEqual(
+      CustomFormatters.get(type('T', {}, {
+        variantParts: [
+          {
+            discriminatorMember: { typeId: 'i32', offset: 0 },
+            variants: [
+              { discriminatorValue: 1n, members: [{ typeId: 'A', offset: 4, name: '__0' }] },
+              { discriminatorValue: 2n, members: [{ typeId: 'B', offset: 4, name: '__0' }] }
+            ]
+          }
+        ]
+      }))?.format,
+      Formatters.formatRustSumType,
+    );
+    assert.strictEqual(
+      CustomFormatters.get(type('(X, Y)', {
+        members: [
+          { typeId: 'X', offset: 0, name: '__0' },
+          { typeId: 'Y', offset: 4, name: '__1' },
+        ],
+      }))?.format,
+      Formatters.formatRustTuple,
+    );
+    assert.strictEqual(CustomFormatters.get(type('&[T]'))?.format, Formatters.formatRustArraySlice);
+    assert.strictEqual(CustomFormatters.get(type('alloc::vec::Vec<T>'))?.format, Formatters.formatRustVector);
+    assert.strictEqual(CustomFormatters.get(type('&str'))?.format, Formatters.formatRustStringSlice);
+    assert.strictEqual(CustomFormatters.get(type('alloc::string::String'))?.format, Formatters.formatRustString);
+    assert.strictEqual(CustomFormatters.get(type('alloc::rc::Rc<T>'))?.format, Formatters.formatRustRcPointer);
+  });
 });

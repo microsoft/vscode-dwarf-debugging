@@ -14,7 +14,6 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/BinaryFormat/Wasm.h"
 #include "llvm/Support/Error.h"
-#include "llvm/Support/JSON.h"
 
 #include <cstdint>
 #include <memory>
@@ -109,6 +108,8 @@ class ApiContext : public DWARFSymbolsApi {
   std::string GetTypeId(lldb_private::CompilerType type);
   llvm::Optional<lldb_private::CompilerType> GetTypeFromId(
       llvm::StringRef type_id);
+  llvm::Optional<api::ExtendedTypeInfo>
+  GetApiExtendedTypeInfo(lldb_private::CompilerType type);
 
   friend struct EvalVisitor;
 };

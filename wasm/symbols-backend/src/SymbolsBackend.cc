@@ -16,6 +16,7 @@
 #include "Plugins/ScriptInterpreter/None/ScriptInterpreterNone.h"
 #include "Plugins/SymbolFile/DWARF/SymbolFileDWARF.h"
 #include "Plugins/SymbolVendor/wasm/SymbolVendorWasm.h"
+#include "api.h"
 #include "lldb/Host/FileSystem.h"
 #include "lldb/Host/linux/HostInfoLinux.h"
 #include "llvm/ADT/StringRef.h"
@@ -32,7 +33,7 @@ struct DefaultPluginsContext
                             lldb_private::ScriptInterpreterNone,
                             lldb_private::FileSystem,
                             lldb_private::CPlusPlusLanguage,
-                            lldb_private::TypeSystemClang,
+                            symbols_backend::TypeSystemClangExtended,
                             lldb_private::wasm::ObjectFileWasm,
                             lldb_private::wasm::SymbolVendorWasm,
                             symbols_backend::WasmProcess,
@@ -149,6 +150,31 @@ EMSCRIPTEN_BINDINGS(DWARFSymbolsPlugin) {
       .property("typeId", &symbols_backend::api::Enumerator::GetTypeId, &symbols_backend::api::Enumerator::SetTypeId)
       ;
 
+  emscripten::class_<symbols_backend::api::VariantPartInfo>("VariantPartInfo")
+      .constructor<>()
+      .property("discriminatorMember", &symbols_backend::api::VariantPartInfo::GetDiscriminatorMember, &symbols_backend::api::VariantPartInfo::SetDiscriminatorMember)
+      .property("variants", &symbols_backend::api::VariantPartInfo::GetVariants, &symbols_backend::api::VariantPartInfo::SetVariants)
+      ;
+
+  emscripten::class_<symbols_backend::api::VariantInfo>("VariantInfo")
+      .constructor<>()
+      .property("discriminatorValue", OptionalGetter(&symbols_backend::api::VariantInfo::GetDiscriminatorValue), OptionalSetter(&symbols_backend::api::VariantInfo::SetDiscriminatorValue))
+      .property("members", &symbols_backend::api::VariantInfo::GetMembers, &symbols_backend::api::VariantInfo::SetMembers)
+      ;
+
+  emscripten::class_<symbols_backend::api::TemplateParameterInfo>("TemplateParameterInfo")
+      .constructor<>()
+      .property("typeId", &symbols_backend::api::TemplateParameterInfo::GetTypeId, &symbols_backend::api::TemplateParameterInfo::SetTypeId)
+      .property("name", OptionalGetter(&symbols_backend::api::TemplateParameterInfo::GetName), OptionalSetter(&symbols_backend::api::TemplateParameterInfo::SetName))
+      ;
+
+  emscripten::class_<symbols_backend::api::ExtendedTypeInfo>("ExtendedTypeInfo")
+      .constructor<>()
+      .property("languageId", &symbols_backend::api::ExtendedTypeInfo::GetLanguageId, &symbols_backend::api::ExtendedTypeInfo::SetLanguageId)
+      .property("variantParts", &symbols_backend::api::ExtendedTypeInfo::GetVariantParts, &symbols_backend::api::ExtendedTypeInfo::SetVariantParts)
+      .property("templateParameters", &symbols_backend::api::ExtendedTypeInfo::GetTemplateParameters, &symbols_backend::api::ExtendedTypeInfo::SetTemplateParameters)
+      ;
+
   emscripten::class_<symbols_backend::api::TypeInfo>("TypeInfo")
       .constructor<>()
       .property("typeNames", &symbols_backend::api::TypeInfo::GetTypeNames, &symbols_backend::api::TypeInfo::SetTypeNames)
@@ -157,10 +183,11 @@ EMSCRIPTEN_BINDINGS(DWARFSymbolsPlugin) {
       .property("size", &symbols_backend::api::TypeInfo::GetSize, &symbols_backend::api::TypeInfo::SetSize)
       .property("canExpand", &symbols_backend::api::TypeInfo::GetCanExpand, &symbols_backend::api::TypeInfo::SetCanExpand)
       .property("hasValue", &symbols_backend::api::TypeInfo::GetHasValue, &symbols_backend::api::TypeInfo::SetHasValue)
-      .property("arraySize", OptionalGetter(&symbols_backend::api::TypeInfo::GetArraySize), OptionalSetter(&symbols_backend::api::TypeInfo::SetArraySize))
+      .property("arraySize", &symbols_backend::api::TypeInfo::GetArraySize, &symbols_backend::api::TypeInfo::SetArraySize)
       .property("isPointer", &symbols_backend::api::TypeInfo::GetIsPointer, &symbols_backend::api::TypeInfo::SetIsPointer)
       .property("members", &symbols_backend::api::TypeInfo::GetMembers, &symbols_backend::api::TypeInfo::SetMembers)
       .property("enumerators", &symbols_backend::api::TypeInfo::GetEnumerators, &symbols_backend::api::TypeInfo::SetEnumerators)
+      .property("extendedInfo", OptionalGetter(&symbols_backend::api::TypeInfo::GetExtendedInfo), OptionalSetter(&symbols_backend::api::TypeInfo::SetExtendedInfo))
       ;
 
   emscripten::class_<symbols_backend::api::AddRawModuleResponse>("AddRawModuleResponse")
@@ -209,7 +236,7 @@ EMSCRIPTEN_BINDINGS(DWARFSymbolsPlugin) {
 
   emscripten::class_<symbols_backend::api::GetMappedLinesResponse>("GetMappedLinesResponse")
       .constructor<>()
-      .property("MappedLines", &symbols_backend::api::GetMappedLinesResponse::GetMappedLines, &symbols_backend::api::GetMappedLinesResponse::SetMappedLines)
+      .property("mappedLines", &symbols_backend::api::GetMappedLinesResponse::GetMappedLines, &symbols_backend::api::GetMappedLinesResponse::SetMappedLines)
       .property("error", OptionalGetter(&symbols_backend::api::GetMappedLinesResponse::GetError), OptionalSetter(&symbols_backend::api::GetMappedLinesResponse::SetError))
       ;
 
@@ -231,6 +258,9 @@ EMSCRIPTEN_BINDINGS(DWARFSymbolsPlugin) {
   emscripten::register_vector<symbols_backend::api::TypeInfo>("TypeInfoArray");
   emscripten::register_vector<symbols_backend::api::FieldInfo>("FieldInfoArray");
   emscripten::register_vector<symbols_backend::api::Enumerator>("EnumeratorArray");
+  emscripten::register_vector<symbols_backend::api::VariantPartInfo>("VariantPartInfoArray");
+  emscripten::register_vector<symbols_backend::api::VariantInfo>("VariantInfoArray");
+  emscripten::register_vector<symbols_backend::api::TemplateParameterInfo>("TemplateParameterInfoArray");
   emscripten::register_vector<uint8_t>("ByteArray");
 
   emscripten::class_<symbols_backend::api::ApiContext>("DWARFSymbolsPluginBase")

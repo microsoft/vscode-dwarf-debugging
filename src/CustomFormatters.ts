@@ -10,8 +10,8 @@ import type { HostInterface } from './WorkerRPC';
 
 export interface FieldInfo {
   typeId: string;
-  name: string | undefined;
   offset: number;
+  name?: string;
 }
 
 export interface Enumerator {
@@ -20,20 +20,48 @@ export interface Enumerator {
   value: bigint;
 }
 
-export interface TypeInfo {
+export interface VariantInfo {
+  discriminatorValue?: bigint;
+  members: FieldInfo[];
+}
+
+export interface VariantPartInfo {
+  discriminatorMember: FieldInfo;
+  variants: VariantInfo[];
+}
+
+export interface TemplateParameterInfo {
   typeId: string;
-  enumerators?: Enumerator[];
+  name?: string;
+}
+
+export interface ExtendedTypeInfo {
+  languageId: number;
+  variantParts: VariantPartInfo[];
+  templateParameters: TemplateParameterInfo[];
+}
+
+export interface TypeInfo {
+  typeNames: string[];
+  typeId: string;
   alignment: number;
   size: number;
+  canExpand: boolean;
+  hasValue: boolean;
+  arraySize: number;
   isPointer: boolean;
   members: FieldInfo[];
-  arraySize: number;
-  hasValue: boolean;
-  typeNames: string[];
-  canExpand: boolean;
+  enumerators: Enumerator[];
+  extendedInfo?: ExtendedTypeInfo;
+}
+
+export interface TypeInfoTree {
+  root: TypeInfo;
+  typeInfos: TypeInfo[];
 }
 
 export interface WasmInterface {
+  readonly view: WasmMemoryView;
   readMemory(offset: number, length: number): Uint8Array<ArrayBuffer>;
   getOp(op: number): WasmValue;
   getLocal(local: number): WasmValue;
@@ -41,21 +69,25 @@ export interface WasmInterface {
 }
 
 export interface Value {
-  location: number;
-  size: number;
-  typeNames: string[];
-  asUint8: () => number;
-  asUint16: () => number;
-  asUint32: () => number;
-  asUint64: () => bigint;
-  asInt8: () => number;
-  asInt16: () => number;
-  asInt32: () => number;
-  asInt64: () => bigint;
-  asFloat32: () => number;
-  asFloat64: () => number;
-  asDataView: (offset?: number, size?: number) => DataView<ArrayBuffer>;
-  $: (member: string | number) => Value;
+  readonly location: number;
+  readonly size: number;
+  readonly typeNames: string[];
+  readonly isEnumeratedValue: boolean;
+  readonly extendedTypeInfo?: ExtendedTypeInfo;
+  asUint8(): number;
+  asUint16(): number;
+  asUint32(): number;
+  asUint64(): bigint;
+  asInt8(): number;
+  asInt16(): number;
+  asInt32(): number;
+  asInt64(): bigint;
+  asFloat32(): number;
+  asFloat64(): number;
+  asDataView(offset?: number, size?: number): DataView<ArrayBuffer>;
+  asType(typeId: string, offset?: number): Value;
+  asPointerToType(typeId: string): Value;
+  $(member: string | number): Value;
   getMembers(): string[];
 }
 
@@ -282,10 +314,10 @@ export class CXXValue implements Value, LazyObject {
     this.objectStore = objectStore;
     this.objectId = objectStore.store(this);
     this.displayValue = displayValue;
-    this.memoryAddress = memoryAddress;
+    this.memoryAddress = memoryAddress === undefined && !data ? this.location : memoryAddress;
   }
 
-  static create(objectStore: LazyObjectStore, wasm: WasmInterface, memoryView: WasmMemoryView, typeInfo: {
+  static create(objectStore: LazyObjectStore, wasm: WasmInterface, memoryView: WasmMemoryView, value: {
     typeInfos: TypeInfo[],
     root: TypeInfo,
     location?: number,
@@ -294,10 +326,10 @@ export class CXXValue implements Value, LazyObject {
     memoryAddress?: number,
   }): CXXValue {
     const typeMap = new Map();
-    for (const info of typeInfo.typeInfos) {
+    for (const info of value.typeInfos) {
       typeMap.set(info.typeId, info);
     }
-    const { location, root, data, displayValue, memoryAddress } = typeInfo;
+    const { location, root, data, displayValue, memoryAddress } = value;
     return new CXXValue(objectStore, wasm, memoryView, location ?? 0, root, typeMap, data, displayValue, memoryAddress);
   }
 
@@ -331,10 +363,10 @@ export class CXXValue implements Value, LazyObject {
     const properties = [];
     if (this.type.arraySize > 0) {
       for (let index = 0; index < this.type.arraySize; ++index) {
-        properties.push({ name: `${index}`, property: await this.getArrayElement(index) });
+        properties.push({ name: `${index}`, property: this.getArrayElement(index) });
       }
     } else {
-      const members = await this.members;
+      const members = this.members;
       const data = members.has('*') ? undefined : this.data;
       for (const [name, { location, type }] of members) {
         const property = new CXXValue(this.objectStore, this.wasm, this.memoryView, location, type, this.typeMap, data);
@@ -345,30 +377,25 @@ export class CXXValue implements Value, LazyObject {
   }
 
   async asRemoteObject(): Promise<Chrome.DevTools.RemoteObject | Chrome.DevTools.ForeignObject> {
-    if (this.type.hasValue && this.type.arraySize === 0) {
-      const formatter = CustomFormatters.get(this.type);
-      if (!formatter) {
-        const type = 'undefined' as Chrome.DevTools.RemoteObjectType;
-        const description = '<not displayable>';
-        return { type, description, hasChildren: false };
-      }
-
+    const formatter = CustomFormatters.get(this.type);
+    if (formatter) {
       if (this.location === undefined || (!this.data && this.location === 0xffffffff)) {
         const type = 'undefined' as Chrome.DevTools.RemoteObjectType;
         const description = '<optimized out>';
         return { type, description, hasChildren: false };
       }
-      const value =
-        new CXXValue(this.objectStore, this.wasm, this.memoryView, this.location, this.type, this.typeMap, this.data);
-
       try {
-        const formattedValue = await formatter.format(this.wasm, value);
+        const formattedValue = formatter.format(this.wasm, this);
         return await lazyObjectFromAny(
           formattedValue, this.objectStore, this.type, this.displayValue, this.memoryAddress)
           .asRemoteObject();
       } catch {
         // Fallthrough
       }
+    } else if (this.type.hasValue && this.type.arraySize === 0) {
+      const type = 'undefined' as Chrome.DevTools.RemoteObjectType;
+      const description = '<not displayable>';
+      return { type, description, hasChildren: false };
     }
 
     const type = (this.type.arraySize > 0 ? 'array' : 'object') as Chrome.DevTools.RemoteObjectType;
@@ -383,12 +410,20 @@ export class CXXValue implements Value, LazyObject {
     };
   }
 
+  get size(): number {
+    return this.type.size;
+  }
+
   get typeNames(): string[] {
     return this.type.typeNames;
   }
 
-  get size(): number {
-    return this.type.size;
+  get isEnumeratedValue(): boolean {
+    return this.type.enumerators.length > 0;
+  }
+
+  get extendedTypeInfo(): ExtendedTypeInfo | undefined {
+    return this.type.extendedInfo;
   }
 
   asInt8(): number {
@@ -434,6 +469,54 @@ export class CXXValue implements Value, LazyObject {
     }
     return this.memoryView.asDataView(offset, size);
   }
+  asType(typeId: string, offset?: number): CXXValue {
+    const targetType = this.typeMap.get(typeId);
+    if (!targetType) {
+      throw new Error(`Invalid type id ${typeId}`);
+    }
+    const targetData = offset && this.data !== undefined
+      ? this.data.slice(offset, offset + targetType.size)
+      : this.data;
+    return new CXXValue(
+      this.objectStore,
+      this.wasm,
+      this.memoryView,
+      this.location + (offset || 0),
+      targetType,
+      this.typeMap,
+      targetData,
+      this.displayValue,
+      this.memoryAddress
+    );
+  }
+  asPointerToType(typeId: string): CXXValue {
+    const targetType = this.typeMap.get(typeId);
+    if (!targetType) {
+      throw new Error(`Invalid type id ${typeId}`);
+    }
+    return new CXXValue(
+      this.objectStore,
+      this.wasm,
+      this.memoryView,
+      this.location,
+      {
+        typeNames: targetType.typeNames.map(t => `${t}${t.endsWith('*') ? '' : ' '}*`),
+        typeId: '',
+        alignment: 4,
+        size: 4,
+        canExpand: true,
+        hasValue: true,
+        arraySize: 0,
+        isPointer: true,
+        members: [{ name: '*', typeId, offset: 0 }],
+        enumerators: [],
+      },
+      this.typeMap,
+      this.data,
+      this.displayValue,
+      this.memoryAddress
+    );
+  }
   $(selector: string | number): CXXValue {
     const data = this.members.has('*') ? undefined : this.data;
 
@@ -471,7 +554,7 @@ export function primitiveObject<T>(
   value: T, description?: string, linearMemoryAddress?: number, type?: TypeInfo): PrimitiveLazyObject<T> | null {
   if (['number', 'string', 'boolean', 'bigint', 'undefined'].includes(typeof value)) {
     if (typeof value === 'bigint' || typeof value === 'number') {
-      const enumerator = type?.enumerators?.find(e => e.value === BigInt(value));
+      const enumerator = type?.enumerators.find(e => e.value === BigInt(value));
       if (enumerator) {
         description = enumerator.name;
       }
@@ -596,14 +679,12 @@ export type FormatterCallback = (wasm: WasmInterface, value: Value) => Formatter
 
 export interface Formatter {
   types: string[] | ((t: TypeInfo) => boolean);
-  imports?: FormatterCallback[];
   format: FormatterCallback;
 }
 
-export class HostWasmInterface {
+export class HostWasmInterface implements WasmInterface {
   private readonly hostInterface: HostInterface;
   private readonly stopId: unknown;
-  private readonly cache: Chrome.DevTools.ForeignObject[] = [];
   readonly view: WasmMemoryView;
   constructor(hostInterface: HostInterface, stopId: unknown) {
     this.hostInterface = hostInterface;
@@ -625,9 +706,9 @@ export class HostWasmInterface {
 }
 
 export class DebuggerProxy {
-  wasm: HostWasmInterface;
+  wasm: WasmInterface;
   target: EmscriptenModule;
-  constructor(wasm: HostWasmInterface, target: EmscriptenModule) {
+  constructor(wasm: WasmInterface, target: EmscriptenModule) {
     this.wasm = wasm;
     this.target = target;
   }

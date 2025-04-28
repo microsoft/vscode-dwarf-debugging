@@ -5,18 +5,15 @@
 
 /* eslint-disable @typescript-eslint/naming-convention */
 
-export interface EmbindObject {
-  new(): this;
-  delete(): void;
-}
+import { EmbindObject, EnumDefinition, EnumValue, Vector } from './embind';
 
-export interface Vector<T> extends EmbindObject {
-  size(): number;
-  get(index: number): T;
-  push_back(value: T): void;
-}
-
-export interface ErrorCode extends EmbindObject { }
+export interface ErrorCode extends EnumValue<
+  ErrorCode,
+  | 'INTERNAL_ERROR'
+  | 'PROTOCOL_ERROR'
+  | 'MODULE_NOT_FOUND_ERROR'
+  | 'TYPE_NAME_IN_MODULE_NOT_FOUND_ERROR'
+  | 'EVAL_ERROR'> { }
 
 export interface Error extends EmbindObject {
   code: ErrorCode;
@@ -42,7 +39,11 @@ export interface SourceLocation extends EmbindObject {
   columnNumber: number;
 }
 
-export interface VariableScope extends EmbindObject { }
+export interface VariableScope extends EnumValue<
+  VariableScope,
+  | 'LOCAL'
+  | 'PARAMETER'
+  | 'GLOBAL'> { }
 
 export interface Variable extends EmbindObject {
   scope: VariableScope;
@@ -63,6 +64,27 @@ export interface Enumerator extends EmbindObject {
   typeId: string;
 }
 
+export interface VariantInfo extends EmbindObject {
+  discriminatorValue: bigint | undefined;
+  members: Vector<FieldInfo>;
+}
+
+export interface VariantPartInfo extends EmbindObject {
+  discriminatorMember: FieldInfo;
+  variants: Vector<VariantInfo>;
+}
+
+export interface TemplateParameterInfo extends EmbindObject {
+  typeId: string;
+  name: string | undefined;
+}
+
+export interface ExtendedTypeInfo extends EmbindObject {
+  languageId: number;
+  variantParts: Vector<VariantPartInfo>;
+  templateParameters: Vector<TemplateParameterInfo>;
+}
+
 export interface TypeInfo extends EmbindObject {
   typeNames: Vector<string>;
   typeId: string;
@@ -70,10 +92,11 @@ export interface TypeInfo extends EmbindObject {
   size: number;
   canExpand: boolean;
   hasValue: boolean;
-  arraySize: number | undefined;
+  arraySize: number;
   isPointer: boolean;
   members: Vector<FieldInfo>;
   enumerators: Vector<Enumerator>;
+  extendedInfo: ExtendedTypeInfo | undefined;
 }
 
 export interface AddRawModuleResponse extends EmbindObject {
@@ -114,7 +137,7 @@ export interface GetInlinedCalleesRangesResponse extends EmbindObject {
 }
 
 export interface GetMappedLinesResponse extends EmbindObject {
-  MappedLines: Vector<number>;
+  mappedLines: Vector<number>;
   error: Error | undefined;
 }
 
@@ -154,13 +177,15 @@ export interface Module extends EmscriptenModule {
   TypeInfoArray: Vector<TypeInfo>;
   FieldInfoArray: Vector<FieldInfo>;
   EnumeratorArray: Vector<Enumerator>;
-  ErrorCode:
-      {INTERNAL_ERROR: ErrorCode, PROTOCOL_ERROR: ErrorCode, MODULE_NOT_FOUND_ERROR: ErrorCode, EVAL_ERROR: ErrorCode};
+  VariantPartInfoArray: Vector<VariantPartInfo>;
+  VariantInfoArray: Vector<VariantInfo>;
+  TemplateParameterInfoArray: Vector<TemplateParameterInfo>;
+  ErrorCode: EnumDefinition<ErrorCode>;
   Error: Error;
   RawLocationRange: RawLocationRange;
   RawLocation: RawLocation;
   SourceLocation: SourceLocation;
-  VariableScope: {LOCAL: VariableScope, PARAMETER: VariableScope, GLOBAL: VariableScope};
+  VariableScope: EnumDefinition<VariableScope>;
   Variable: Variable;
   FieldInfo: FieldInfo;
   Enumerator: Enumerator;

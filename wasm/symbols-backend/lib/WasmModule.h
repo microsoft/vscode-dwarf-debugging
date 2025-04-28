@@ -4,6 +4,7 @@
 
 #ifndef EXTENSIONS_CXX_DEBUGGING_WASM_MODULE_H_
 #define EXTENSIONS_CXX_DEBUGGING_WASM_MODULE_H_
+
 #include "lldb/lldb-enumerations.h"
 #include "lldb/lldb-forward.h"
 #include "lldb/lldb-types.h"
@@ -111,6 +112,7 @@ class WasmModule {
   lldb::VariableSP FindVariableAtOffset(lldb::addr_t offset,
                                         int inline_frame_index,
                                         llvm::StringRef name) const;
+
   llvm::Optional<lldb_private::CompilerType> FindType(
       llvm::StringRef name) const;
 
