@@ -2,7 +2,6 @@ name: Rust application
 source_file: resources/app.rs
 flags: [
   [--target, wasm32-wasip1, -g]]
-only: true
 script:
   - reason: setup
     actions:
