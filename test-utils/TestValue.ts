@@ -85,7 +85,15 @@ export default class TestValue implements Value {
     return new TestValue(content, `${elements[0].typeNames[0]}${space}*`, members);
   }
   static fromType(typeName: string, data: TypedArrayLike = new Uint8Array(), location?: number) {
-    return new TestValue(new DataView(data.buffer), typeName, undefined, location);
+    let members: undefined | { [key: string]: TestValue, [key: number]: TestValue; };
+    if (typeName.startsWith('(') && typeName.endsWith(')')) {
+      members = Object.fromEntries(
+        typeName.slice(1, typeName.length - 1)
+          .split(',')
+          .map((s, i) => [`__${i}`, TestValue.fromType(s.trim())]),
+      );
+    }
+    return new TestValue(new DataView(data.buffer), typeName, members, location);
   }
   static fromMembers(typeName: string, members: { [key: string]: TestValue, [key: number]: TestValue; }): TestValue {
     return new TestValue(new DataView(new ArrayBuffer(0)), typeName, members);

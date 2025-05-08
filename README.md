@@ -9,9 +9,17 @@ This project works by compiling the WebAssembly backend for the Chrome [C/C++ De
 
 In addition for the variable view and the basic `C/C++` expression evaluation support via [lldb-eval](https://github.com/google/lldb-eval) included in the original Chrome C/C++ Debugging Extension the following features has been added:
 
-  - Basic support for `Rust` types, most specifically sum types which couldn't be viewed in the original extension but also better support for core library types like `Vec` and `String` which were partially viewable in the original extension.
- 
-
+  - Basic support for `Rust` types, most specifically sum types which couldn't be viewed in the original extension but also better support for core / standard library types like:
+    - `&[T]`
+    - `alloc::vec::Vec<T>`
+    - `alloc::collections::vec_deque::VecDeque<T>`
+    - `&str`
+    - `alloc::string::String`
+    - `alloc::rc::Rc<T>`
+    - `alloc::rc::Weak<T>`
+    - `std::collections::hash::map::HashMap<K, V>`
+    - `std::collections::hash::map::HashSet<T>`
+    
 ## Contributing
 
 ### Building (using Docker or Podman)
