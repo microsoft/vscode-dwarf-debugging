@@ -31,6 +31,10 @@ interface TestSpec {
       name: string;
       type?: string;
       value?: unknown;
+      has_element?: {
+        name: string;
+        value: unknown;
+      }[];
     }[];
     evaluations?: {
       expression: string;
@@ -133,11 +137,18 @@ async function defineTestCaseScript(test: TestSpec, testCallback: (description: 
       isResumed = false;
     });
 
-    for (const { name, type, value } of variables || []) {
-      testCallback({ variable: name, type, value }, async (debuggerSession) => {
+    for (const { name, type, value, has_element } of variables || []) {
+      testCallback({ variable: name, type, value, has_element: has_element?.map(m => `(${m.name} = ${m.value})`).join(' && ') }, async (debuggerSession) => {
         const result = await getVariable(debuggerSession, name);
         assert(value === undefined || result.value === `${value}` || result.description === `${value}`, `Actual value: ${result.value}`);
         assert(type === undefined || result.description === type, `Actual type: '${result.description}'`);
+        if (has_element) {
+          const elements = await getVariableElements(debuggerSession, name, has_element.map(element => element.name));
+          assert(
+            elements.some(actualValues => has_element.every(({ name, value }) => actualValues[name] === `${value}`)),
+            `Actual elements:${elements.map(Object.entries).map(entries => `\n  ${entries.map(([name, value]) => `(${name} = ${value})`).join(' && ')}`).join('')}`,
+          );
+        }
       });
     }
 
@@ -228,7 +239,26 @@ async function getVariable(debuggerSession: DebuggerSession, scopedPath: string)
   return formatEvaluateResult(value);
 }
 
-function formatEvaluateResult(result: Chrome.DevTools.RemoteObject | Chrome.DevTools.ForeignObject | null): { value: string, description?: string; } {
+async function getVariableElements(debuggerSession: DebuggerSession, scopedPath: string, subPaths: string[]) {
+  const { objectId } = await getVariable(debuggerSession, scopedPath);
+  assert(objectId, `Expected variable ${scopedPath} to be an object.`);
+  const elementProperties = await debuggerSession.getProperties(objectId);
+  const elementValues = elementProperties.map(() => ({} as Record<string, string>));
+  for (let i = 0; i < elementValues.length; i++) {
+    for (const path of subPaths) {
+      const { value } = await getVariable(debuggerSession, `${scopedPath}.${elementProperties[i].name}.${path}`);
+      elementValues[i][path] = value;
+    }
+  }
+  return elementValues;
+}
+
+function formatEvaluateResult(result: Chrome.DevTools.RemoteObject | Chrome.DevTools.ForeignObject | null): {
+  value: string;
+  description?: string;
+  objectId?: Chrome.DevTools.RemoteObjectId;
+  type?: Chrome.DevTools.RemoteObjectType;
+} {
   if (result == null) {
     return { value: 'null' };
   }
@@ -240,7 +270,9 @@ function formatEvaluateResult(result: Chrome.DevTools.RemoteObject | Chrome.DevT
   }
   return {
     value: `${result.value}`,
-    description: result.description
+    description: result.description,
+    objectId: result.objectId,
+    type: result.type,
   };
 }
 

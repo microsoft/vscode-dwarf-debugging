@@ -7,28 +7,28 @@ script:
     actions:
     - file: app.rs
       action: set_breakpoint
-      breakpoint: 14
-    - file: app.rs
-      action: set_breakpoint
       breakpoint: 16
     - file: app.rs
       action: set_breakpoint
-      breakpoint: 19
+      breakpoint: 18
     - file: app.rs
       action: set_breakpoint
-      breakpoint: 38
+      breakpoint: 21
     - file: app.rs
       action: set_breakpoint
-      breakpoint: 46
+      breakpoint: 48
     - file: app.rs
       action: set_breakpoint
-      breakpoint: 54
+      breakpoint: 58
     - file: app.rs
       action: set_breakpoint
-      breakpoint: 61
+      breakpoint: 66
+    - file: app.rs
+      action: set_breakpoint
+      breakpoint: 73
   - reason: breakpoint
     file: app.rs
-    line: 14
+    line: 16
     variables:
       - name: Parameter.animal
         type: app::Animal
@@ -40,7 +40,7 @@ script:
         value: 8.51
   - reason: breakpoint
     file: app.rs
-    line: 16
+    line: 18
     variables:
       - name: Local.name.string
         value: '"Biscuit"'
@@ -48,7 +48,7 @@ script:
         value: 8.51
   - reason: breakpoint
     file: app.rs
-    line: 14
+    line: 16
     variables:
       - name: Parameter.animal
         type: app::Animal
@@ -60,7 +60,7 @@ script:
         value: 3.15
   - reason: breakpoint
     file: app.rs
-    line: 19
+    line: 21
     variables:
       - name: Local.name.string
         value: '"Whiskers"'
@@ -68,8 +68,22 @@ script:
         value: 3.15
   - reason: breakpoint
     file: app.rs
-    line: 38
+    line: 48
     variables:
+      - name: Local.hash_map
+        type: 'std::collections::hash::map::HashMap<int, &str, std::hash::random::RandomState>'
+      - name: Local.hash_map
+        has_element:
+          - name: key
+            value: 1
+          - name: value.string
+            value: '"One"'
+      - name: Local.hash_map
+        has_element:
+          - name: key
+            value: 2
+          - name: value.string
+            value: '"Two"'
       - name: Local.vector
         type: 'alloc::vec::Vec<int, alloc::alloc::Global>'
       - name: Local.vector.0
@@ -82,6 +96,16 @@ script:
         value: 4
       - name: Local.vector.4
         value: 5
+      - name: Local.vec_deque
+        type: 'alloc::collections::vec_deque::VecDeque<int, alloc::alloc::Global>'
+      - name: Local.vec_deque.0
+        value: 4
+      - name: Local.vec_deque.1
+        value: 5
+      - name: Local.vec_deque.2
+        value: 1
+      - name: Local.vec_deque.3
+        value: 2
       - name: Local.vector_slice
         type: '&[i32]'
       - name: Local.vector_slice.0
@@ -96,7 +120,7 @@ script:
         value: '"scu"'
   - reason: breakpoint
     file: app.rs
-    line: 46
+    line: 58
     variables:
       - name: Local.strong_ref.$0
         type: app::Point2D
@@ -116,7 +140,7 @@ script:
         value: 2
   - reason: breakpoint
     file: app.rs
-    line: 54
+    line: 66
     variables:
       - name: Local.weak_ref_2.strong_count
         value: 1
@@ -124,7 +148,7 @@ script:
         value: 1
   - reason: breakpoint
     file: app.rs
-    line: 61
+    line: 73
     variables:
       - name: Local.weak_ref_2.$0
         value: null

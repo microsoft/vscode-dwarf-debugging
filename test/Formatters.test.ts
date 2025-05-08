@@ -400,6 +400,63 @@ describe('Formatters', () => {
         }
       );
     });
+
+    it('formatRustHashMap', async () => {
+      const wasm = new TestWasmInterface();
+      const value = TestValue.fromMembers('std::collections::hash::map::HashMap<test::Key, test::Value>', {
+        base: TestValue.fromMembers('hashbrown::map::HashMap<test::Key, test::Value>', {
+          table: TestValue.fromMembers('', {
+            table: TestValue.fromMembers('', {
+              bucket_mask: TestValue.fromUint32(3),
+              ctrl: TestValue.fromMembers('', {
+                pointer: TestValue.pointerTo([TestValue.fromUint64(0xFF_7F_7F_FFn)])
+              })
+            })
+          }).withTemplateParameters('(test::Key, test::Value)')
+        })
+      });
+
+      assert.deepEqual(
+        Formatters.formatRustHashMap(wasm, value),
+        [
+          {
+            key: TestValue.fromType('test::Key'),
+            value: TestValue.fromType('test::Value')
+          },
+          {
+            key: TestValue.fromType('test::Key'),
+            value: TestValue.fromType('test::Value')
+          }
+        ]
+      );
+    });
+
+    it('formatRustHashSet', async () => {
+      const wasm = new TestWasmInterface();
+      const value = TestValue.fromMembers('std::collections::hash::set::HashSet<test::Value>', {
+        base: TestValue.fromMembers('hashbrown::map::HashSet<test::Value>', {
+          map: TestValue.fromMembers('hashbrown::map::HashMap<test::Value, ()>', {
+            table: TestValue.fromMembers('', {
+              table: TestValue.fromMembers('', {
+                bucket_mask: TestValue.fromUint32(7),
+                ctrl: TestValue.fromMembers('', {
+                  pointer: TestValue.pointerTo([TestValue.fromUint64(0x7F_FF_FF_FF_7F_7F_FF_FFn)])
+                })
+              })
+            }).withTemplateParameters('(test::Value, ())')
+          })
+        })
+      });
+
+      assert.deepEqual(
+        Formatters.formatRustHashSet(wasm, value),
+        [
+          TestValue.fromType('test::Value'),
+          TestValue.fromType('test::Value'),
+          TestValue.fromType('test::Value')
+        ]
+      );
+    });
   });
 });
 
@@ -533,5 +590,9 @@ describe('CustomFormatters', () => {
     assert.strictEqual(CustomFormatters.get(type('&str'))?.format, Formatters.formatRustStringSlice);
     assert.strictEqual(CustomFormatters.get(type('alloc::string::String'))?.format, Formatters.formatRustString);
     assert.strictEqual(CustomFormatters.get(type('alloc::rc::Rc<T>'))?.format, Formatters.formatRustRcPointer);
+    assert.strictEqual(CustomFormatters.get(type('std::collections::hash::map::HashMap<T>'))?.format, Formatters.formatRustHashMap);
+    assert.strictEqual(CustomFormatters.get(type('hashbrown::map::HashMap<T>'))?.format, Formatters.formatRustHashMapBase);
+    assert.strictEqual(CustomFormatters.get(type('std::collections::hash::set::HashSet<T>'))?.format, Formatters.formatRustHashSet);
+    assert.strictEqual(CustomFormatters.get(type('hashbrown::set::HashSet<T>'))?.format, Formatters.formatRustHashSetBase);
   });
 });

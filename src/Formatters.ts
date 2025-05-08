@@ -397,6 +397,22 @@ export function formatRustVector(wasm: WasmInterface, value: Value) {
   return elements;
 }
 
+export function formatRustVectorDeque(wasm: WasmInterface, value: Value) {
+  const elementTypeId = value.extendedTypeInfo?.templateParameters[0]?.typeId;
+  if (!elementTypeId) {
+    throw new Error(`Can't determine element type`);
+  }
+  const data = value.$('buf.inner.ptr').asPointerToType(elementTypeId);
+  const capacity = value.$('buf.inner.cap').asUint32();
+  const head = value.$('head').asUint32();
+  const size = value.$('len').asUint32();
+  const elements: Value[] = [];
+  for (let i = 0; i < size; ++i) {
+    elements.push(data.$((head + i) % capacity));
+  }
+  return elements;
+}
+
 export function formatRustStringSlice(wasm: WasmInterface, value: Value) {
   const data = value.$('data_ptr').asUint32();
   const size = value.$('length').asUint32();
@@ -428,6 +444,41 @@ export function formatRustRcPointer(wasm: WasmInterface, value: Value): { [key: 
   };
 }
 
+export function formatRustHashMap(wasm: WasmInterface, value: Value): { key: Value; value: Value; }[] {
+  return formatRustHashMapBase(wasm, value.$('base'));
+}
+
+export function formatRustHashMapBase(wasm: WasmInterface, value: Value): { key: Value; value: Value; }[] {
+  const rawTable = value.$('table');
+  const elementTypeId = rawTable.extendedTypeInfo?.templateParameters[0]?.typeId;
+  if (!elementTypeId) {
+    throw new Error(`Can't determine element type`);
+  }
+  const rawTableInner = rawTable.$('table');
+  const bucketMask = rawTableInner.$('bucket_mask').asUint32();
+  const dataPointer = rawTableInner.$('ctrl.pointer').asPointerToType(elementTypeId);
+  const tagsView = rawTableInner.$('ctrl.pointer.*').asDataView(0, bucketMask + 1);
+  const elements: { key: Value; value: Value; }[] = [];
+  for (let i = 0; i <= bucketMask; i++) {
+    if ((tagsView.getUint8(i) & 0x80) === 0) {
+      const keyValuePair = dataPointer.$(-(i + 1));
+      elements.push({
+        key: keyValuePair.$('__0'),
+        value: keyValuePair.$('__1'),
+      });
+    }
+  }
+  return elements;
+}
+
+export function formatRustHashSet(wasm: WasmInterface, value: Value): Value[] {
+  return formatRustHashSetBase(wasm, value.$('base'));
+}
+
+export function formatRustHashSetBase(wasm: WasmInterface, value: Value): Value[] {
+  return formatRustHashMapBase(wasm, value.$('map')).map(element => element.key);
+}
+
 function getDiscriminatorValue(value: Value, discriminatorMember: FieldInfo) {
   const discriminatorValue = value.asType(discriminatorMember.typeId, discriminatorMember.offset);
   switch (discriminatorValue.size) {
@@ -447,6 +498,11 @@ CustomFormatters.addFormatter({ types: rustTypeMatch(hasVariantParts), format: f
 CustomFormatters.addFormatter({ types: rustTypeMatch(hasOnlyRustTupleLikeMembers), format: formatRustTuple });
 CustomFormatters.addFormatter({ types: rustTypeMatch(/^&\[.+\]$/), format: formatRustArraySlice });
 CustomFormatters.addFormatter({ types: rustTypeMatch(/^alloc::vec::Vec<.+>$/), format: formatRustVector });
+CustomFormatters.addFormatter({ types: rustTypeMatch(/^alloc::collections::vec_deque::VecDeque<.+>$/), format: formatRustVectorDeque });
 CustomFormatters.addFormatter({ types: rustTypeMatch('&str'), format: formatRustStringSlice });
 CustomFormatters.addFormatter({ types: rustTypeMatch('alloc::string::String'), format: formatRustString });
 CustomFormatters.addFormatter({ types: rustTypeMatch(/^alloc::rc::(Rc|Weak)<.+>$/), format: formatRustRcPointer });
+CustomFormatters.addFormatter({ types: rustTypeMatch(/^std::collections::hash::map::HashMap<.+>$/), format: formatRustHashMap });
+CustomFormatters.addFormatter({ types: rustTypeMatch(/^hashbrown::map::HashMap<.+>$/), format: formatRustHashMapBase });
+CustomFormatters.addFormatter({ types: rustTypeMatch(/^std::collections::hash::set::HashSet<.+>$/), format: formatRustHashSet });
+CustomFormatters.addFormatter({ types: rustTypeMatch(/^hashbrown::set::HashSet<.+>$/), format: formatRustHashSetBase });

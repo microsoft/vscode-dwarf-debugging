@@ -46,7 +46,7 @@ describe('SymbolsBackend', () => {
     try {
       okReponse(plugin.AddRawModule('1', 'app_Rust_application_0.wasm'));
 
-      const { rawLocationRanges: [{ startOffset: codeOffset }] } = okReponse(plugin.SourceLocationToRawLocation('1', 'app.rs', 31, -1));
+      const { rawLocationRanges: [{ startOffset: codeOffset }] } = okReponse(plugin.SourceLocationToRawLocation('1', 'app.rs', 32, -1));
 
       const debuggerProxy = new TestWasmInterface();
       debuggerProxy.memory = new SharedArrayBuffer(32);
@@ -87,7 +87,7 @@ describe('SymbolsBackend', () => {
     try {
       okReponse(plugin.AddRawModule('1', 'app_Rust_application_0.wasm'));
 
-      const { rawLocationRanges: [{ startOffset: codeOffset }] } = okReponse(plugin.SourceLocationToRawLocation('1', 'app.rs', 35, -1));
+      const { rawLocationRanges: [{ startOffset: codeOffset }] } = okReponse(plugin.SourceLocationToRawLocation('1', 'app.rs', 38, -1));
 
       const debuggerProxy = new TestWasmInterface();
       debuggerProxy.memory = new SharedArrayBuffer(32);
