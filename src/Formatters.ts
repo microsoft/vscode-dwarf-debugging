@@ -1,0 +1,508 @@
+// This file is based on a file from revision cf3a5c70b97b388fff3490b62f1bdaaa6a26f8e1 
+// of the Chrome DevTools C/C++ Debugging Extension, see the wasm/symbols-backend/LICENSE file.
+//
+// https://github.com/ChromeDevTools/devtools-frontend/blob/main/extensions/cxx_debugging/src/Formatters.ts
+
+import {
+  CustomFormatters,
+  type FieldInfo,
+  type LazyObject,
+  PrimitiveLazyObject,
+  type TypeInfo,
+  type Value,
+  type WasmInterface
+} from './CustomFormatters';
+import type { ForeignObject } from './WasmTypes';
+
+/*
+ * Numbers
+ */
+CustomFormatters.addFormatter({ types: ['bool'], format: (wasm, value) => value.asUint8() > 0 });
+CustomFormatters.addFormatter({ types: ['uint16_t'], format: (wasm, value) => value.asUint16() });
+CustomFormatters.addFormatter({ types: ['uint32_t'], format: (wasm, value) => value.asUint32() });
+CustomFormatters.addFormatter({ types: ['uint64_t'], format: (wasm, value) => value.asUint64() });
+
+CustomFormatters.addFormatter({ types: ['int16_t'], format: (wasm, value) => value.asInt16() });
+CustomFormatters.addFormatter({ types: ['int32_t'], format: (wasm, value) => value.asInt32() });
+CustomFormatters.addFormatter({ types: ['int64_t'], format: (wasm, value) => value.asInt64() });
+
+CustomFormatters.addFormatter({ types: ['float'], format: (wasm, value) => value.asFloat32() });
+CustomFormatters.addFormatter({ types: ['double'], format: (wasm, value) => value.asFloat64() });
+
+export const enum Constants {
+  MAX_STRING_LEN = (1 << 28) - 16,  // This is the maximum string len for 32bit taken from V8
+  PAGE_SIZE = 1 << 12,              // Block size used for formatting strings when searching for the null terminator
+  SAFE_HEAP_START = 1 << 10,
+}
+export function formatVoid(): () => LazyObject {
+  return () => new PrimitiveLazyObject('undefined', undefined, '<void>');
+}
+
+CustomFormatters.addFormatter({ types: ['void'], format: formatVoid });
+
+CustomFormatters.addFormatter({ types: ['uint8_t', 'int8_t'], format: formatChar });
+
+export function formatChar(wasm: WasmInterface, value: Value): string | number {
+  const char = value.typeNames.includes('int8_t') ? Math.abs(value.asInt8()) : value.asUint8();
+  if (value.isEnumeratedValue) {
+    return char;
+  }
+  switch (char) {
+    case 0x0:
+      return '\'\\0\'';
+    case 0x7:
+      return '\'\\a\'';
+    case 0x8:
+      return '\'\\b\'';
+    case 0x9:
+      return '\'\\t\'';
+    case 0xA:
+      return '\'\\n\'';
+    case 0xB:
+      return '\'\\v\'';
+    case 0xC:
+      return '\'\\f\'';
+    case 0xD:
+      return '\'\\r\'';
+    case 0x27:
+      return '\'\\\'\'';
+  }
+  if (char < 0x20 || char > 0x7e) {
+    return `'\\x${char.toString(16).padStart(2, '0')}'`;
+  }
+  return `'${String.fromCharCode(value.asInt8())}'`;
+}
+
+CustomFormatters.addFormatter({
+  types: ['wchar_t', 'char32_t', 'char16_t'],
+  format: (wasm, value) => {
+    const codepoint = value.size === 2 ? value.asUint16() : value.asUint32();
+    try {
+      return String.fromCodePoint(codepoint);
+    } catch {
+      return `U+${codepoint.toString(16).padStart(value.size * 2, '0')}`;
+    }
+  },
+});
+
+interface FormattedStringResult<T extends InstanceType<CharArrayConstructor> = Uint8Array> {
+  size: number;
+  string: string;
+  chars: T;
+}
+
+function formattedStringResult<T extends InstanceType<CharArrayConstructor>>(chars: T, decode: (chars: T) => string): FormattedStringResult<T> {
+  return {
+    size: chars.length,
+    string: JSON.stringify(decode(chars)),
+    chars
+  };
+}
+
+/*
+ * STL
+ */
+function formatLibCXXString<T extends CharArrayConstructor>(
+  wasm: WasmInterface, value: Value, charType: T,
+  decode: (chars: InstanceType<T>) => string): FormattedStringResult<InstanceType<T>> {
+  const shortString = value.$('__r_.__value_.<union>.__s');
+  const size = shortString.getMembers().includes('<union>') ? shortString.$('<union>.__size_').asUint8() :
+    shortString.$('__size_').asUint8();
+  const isLong = 0 < (size & 0x80);
+  const charSize = charType.BYTES_PER_ELEMENT;
+  if (isLong) {
+    const longString = value.$('__r_.__value_.<union>.__l');
+    const data = longString.$('__data_').asUint32();
+    const stringSize = longString.$('__size_').asUint32();
+
+    const copyLen = Math.min(stringSize * charSize, Constants.MAX_STRING_LEN);
+    const bytes = wasm.readMemory(data, copyLen);
+    const text = new charType(bytes.buffer, bytes.byteOffset, stringSize) as InstanceType<T>;
+    return formattedStringResult(text, decode);
+  }
+
+  const bytes = shortString.$('__data_').asDataView(0, size * charSize);
+  const text = new charType(bytes.buffer, bytes.byteOffset, size) as InstanceType<T>;
+  return formattedStringResult(text, decode);
+}
+
+export function formatLibCXX8String(wasm: WasmInterface, value: Value): FormattedStringResult {
+  return formatLibCXXString(wasm, value, Uint8Array, str => new TextDecoder().decode(str));
+}
+
+export function formatLibCXX16String(wasm: WasmInterface, value: Value): FormattedStringResult<Uint16Array> {
+  return formatLibCXXString(wasm, value, Uint16Array, str => new TextDecoder('utf-16le').decode(str));
+}
+
+export function formatLibCXX32String(wasm: WasmInterface, value: Value): FormattedStringResult<Uint32Array> {
+  // emscripten's wchar is 4 byte
+  return formatLibCXXString(
+    wasm, value, Uint32Array, str => Array.from(str).map(v => String.fromCodePoint(v)).join(''));
+}
+
+CustomFormatters.addFormatter({
+  types: [
+    'std::__2::string',
+    'std::__2::basic_string<char, std::__2::char_traits<char>, std::__2::allocator<char> >',
+    'std::__2::u8string',
+    'std::__2::basic_string<char8_t, std::__2::char_traits<char8_t>, std::__2::allocator<char8_t> >',
+  ],
+  format: formatLibCXX8String,
+});
+
+CustomFormatters.addFormatter({
+  types: [
+    'std::__2::u16string',
+    'std::__2::basic_string<char16_t, std::__2::char_traits<char16_t>, std::__2::allocator<char16_t> >',
+  ],
+  format: formatLibCXX16String,
+});
+
+CustomFormatters.addFormatter({
+  types: [
+    'std::__2::wstring',
+    'std::__2::basic_string<wchar_t, std::__2::char_traits<wchar_t>, std::__2::allocator<wchar_t> >',
+    'std::__2::u32string',
+    'std::__2::basic_string<char32_t, std::__2::char_traits<char32_t>, std::__2::allocator<char32_t> >',
+  ],
+  format: formatLibCXX32String,
+});
+
+type CharArrayConstructor = Uint8ArrayConstructor | Uint16ArrayConstructor | Uint32ArrayConstructor;
+
+function formatRawString<T extends CharArrayConstructor>(
+  wasm: WasmInterface, value: Value, charType: T, decode: (chars: InstanceType<T>) => string):
+  FormattedStringResult<InstanceType<T>> | { [key: string]: Value | null; } {
+  const address = value.asUint32();
+  if (address < Constants.SAFE_HEAP_START) {
+    return formatPointerOrReference(wasm, value);
+  }
+  const charSize = charType.BYTES_PER_ELEMENT;
+  const slices: DataView[] = [];
+  const deref = value.$('*');
+  for (let bufferSize = 0; bufferSize < Constants.MAX_STRING_LEN; bufferSize += Constants.PAGE_SIZE) {
+    // Copy PAGE_SIZE bytes
+    const buffer = deref.asDataView(bufferSize, Constants.PAGE_SIZE);
+    // Convert to charType
+    const substr = new charType(buffer.buffer, buffer.byteOffset, buffer.byteLength / charSize);
+    const strlen = substr.indexOf(0);
+    if (strlen >= 0) {
+      // buffer size is in bytes, strlen in characters
+      const str = new charType(bufferSize / charSize + strlen) as InstanceType<T>;
+      for (let i = 0; i < slices.length; ++i) {
+        str.set(
+          new charType(slices[i].buffer, slices[i].byteOffset, slices[i].byteLength / charSize),
+          i * Constants.PAGE_SIZE / charSize);
+      }
+      str.set(substr.subarray(0, strlen), bufferSize / charSize);
+      return formattedStringResult(str, decode);
+    }
+    slices.push(buffer);
+  }
+  return formatPointerOrReference(wasm, value);
+}
+
+export function formatCString(wasm: WasmInterface, value: Value): FormattedStringResult | {
+  [key: string]: Value | null,
+} {
+  return formatRawString(wasm, value, Uint8Array, str => new TextDecoder().decode(str));
+}
+
+export function formatU16CString(wasm: WasmInterface, value: Value): FormattedStringResult<Uint16Array> | {
+  [key: string]: Value | null,
+} {
+  return formatRawString(wasm, value, Uint16Array, str => new TextDecoder('utf-16le').decode(str));
+}
+
+export function formatCWString(wasm: WasmInterface, value: Value): FormattedStringResult<Uint32Array> | {
+  [key: string]: Value | null,
+} {
+  // emscripten's wchar is 4 byte
+  return formatRawString(wasm, value, Uint32Array, str => Array.from(str).map(v => String.fromCodePoint(v)).join(''));
+}
+
+// Register with higher precedence than the generic pointer handler.
+CustomFormatters.addFormatter({ types: ['char *', 'char8_t *'], format: formatCString });
+CustomFormatters.addFormatter({ types: ['char16_t *'], format: formatU16CString });
+CustomFormatters.addFormatter({ types: ['wchar_t *', 'char32_t *'], format: formatCWString });
+
+export function formatVector(wasm: WasmInterface, value: Value): Value[] {
+  const begin = value.$('__begin_');
+  const end = value.$('__end_');
+  const size = (end.asUint32() - begin.asUint32()) / begin.$('*').size;
+  const elements = [];
+  for (let i = 0; i < size; ++i) {
+    elements.push(begin.$(i));
+  }
+  return elements;
+}
+
+function reMatch(...exprs: RegExp[]): (type: TypeInfo) => boolean {
+  return (type: TypeInfo) => {
+    for (const expr of exprs) {
+      for (const name of type.typeNames) {
+        if (expr.exec(name)) {
+          return true;
+        }
+      }
+    }
+
+    for (const expr of exprs) {
+      for (const name of type.typeNames) {
+        if (name.startsWith('const ')) {
+          if (expr.exec(name.substring(6))) {
+            return true;
+          }
+        }
+      }
+    }
+    return false;
+  };
+}
+
+CustomFormatters.addFormatter({ types: reMatch(/^std::vector<.+>$/), format: formatVector });
+
+export function formatPointerOrReference(wasm: WasmInterface, value: Value): { [key: string]: Value | null; } {
+  const address = value.asUint32();
+  if (address === 0) {
+    return { '0x0': null };
+  }
+  return { [`0x${address.toString(16)}`]: value.$('*') };
+}
+CustomFormatters.addFormatter({ types: type => type.isPointer, format: formatPointerOrReference });
+
+export function formatDynamicArray(wasm: WasmInterface, value: Value): { [key: string]: Value | null; } {
+  return { [`0x${value.location.toString(16)}`]: value.$(0) };
+}
+CustomFormatters.addFormatter({ types: reMatch(/^.+\[\]$/), format: formatDynamicArray });
+
+export function formatUInt128(wasm: WasmInterface, value: Value): bigint {
+  const view = value.asDataView();
+  return (view.getBigUint64(8, true) << BigInt(64)) + (view.getBigUint64(0, true));
+}
+CustomFormatters.addFormatter({ types: ['unsigned __int128'], format: formatUInt128 });
+
+export function formatInt128(wasm: WasmInterface, value: Value): bigint {
+  const view = value.asDataView();
+  return (view.getBigInt64(8, true) << BigInt(64)) | (view.getBigUint64(0, true));
+}
+CustomFormatters.addFormatter({ types: ['__int128'], format: formatInt128 });
+
+export function formatExternRef(wasm: WasmInterface, value: Value): () => LazyObject {
+  const obj = {
+    async getProperties(): Promise<Array<{ name: string, property: LazyObject; }>> {
+      return [];
+    },
+    async asRemoteObject(): Promise<ForeignObject> {
+      const encodedValue = value.asUint64();
+      const ValueClasses: ['global', 'local', 'operand'] = ['global', 'local', 'operand'];
+      const valueClass = ValueClasses[Number(encodedValue >> 32n)];
+      return { type: 'reftype', valueClass, index: Number(BigInt.asUintN(32, encodedValue)) };
+    }
+  };
+  return () => obj;
+}
+CustomFormatters.addFormatter({ types: ['__externref_t', 'externref_t'], format: formatExternRef });
+
+/*
+ * Rust language support
+ */
+export const enum LanguageId {
+  Rust = 0x1c,
+}
+
+type TypeInfoWithExtendedInfo = TypeInfo & Required<Pick<TypeInfo, 'extendedInfo'>>;
+
+function extendedLanguageTypeMatch(
+  languageId: LanguageId,
+  predicate: string | RegExp | ((type: TypeInfoWithExtendedInfo) => boolean),
+): (type: TypeInfo) => boolean {
+  if (typeof predicate !== 'function') {
+    if (typeof predicate === 'string') {
+      const typeName = predicate;
+      predicate = type => type.typeNames.includes(typeName);
+    } else {
+      const typeRegExp = predicate;
+      predicate = type => type.typeNames.some(typeName => typeRegExp.test(typeName));
+    }
+  }
+  return type => {
+    return type.extendedInfo?.languageId === languageId && predicate(type as TypeInfoWithExtendedInfo);
+  };
+}
+
+const rustTypeMatch = extendedLanguageTypeMatch.bind(null, LanguageId.Rust);
+
+function hasOnlyRustTupleLikeMembers(type: TypeInfo) {
+  return type.members.length > 0 && type.members.every(({ name }, i) => name === `__${i}`);
+}
+
+function hasVariantParts(type: TypeInfo) {
+  return type.extendedInfo !== undefined && type.extendedInfo.variantParts.length > 0;
+}
+
+function unwrapLoneRustTupleLikeMember(value: Value) {
+  const members = value.getMembers();
+  return members.length === 1 && members[0] === '__0' ? value.$('__0') : value;
+}
+
+export function formatRustSumType(wasm: WasmInterface, value: Value) {
+  const variantPart = value.extendedTypeInfo!.variantParts[0];
+  if (!variantPart) {
+    throw new Error(`Can't format sum type without variant info`);
+  }
+
+  const discriminatorValue = getDiscriminatorValue(value, variantPart.discriminatorMember);
+  const variant =
+    variantPart.variants.find(v => v.discriminatorValue === discriminatorValue) ||
+    variantPart.variants.find(v => v.discriminatorValue === undefined);
+  if (!variant) {
+    throw new Error(`Invalid discriminator value ${discriminatorValue}`);
+  }
+  if (!variant.members[0]) {
+    throw new Error(`Can't format sum type where variant is missing member info`);
+  }
+
+  const { name = discriminatorValue.toString(), typeId, offset } = variant.members[0];
+  const variantValue = value.asType(typeId, offset);
+
+  return { [name]: unwrapLoneRustTupleLikeMember(variantValue) };
+}
+
+export function formatRustTuple(wasm: WasmInterface, value: Value): Value[] | { [key: string]: Value; } {
+  return value.getMembers().map(m => value.$(m));
+}
+
+export function formatRustArraySlice(wasm: WasmInterface, value: Value) {
+  const data = value.$('data_ptr');
+  const size = value.$('length').asUint32();
+  const elements: Value[] = [];
+  for (let i = 0; i < size; ++i) {
+    elements.push(data.$(i));
+  }
+  return elements;
+}
+
+export function formatRustVector(wasm: WasmInterface, value: Value) {
+  const elementTypeId = value.extendedTypeInfo?.templateParameters[0]?.typeId;
+  if (!elementTypeId) {
+    throw new Error(`Can't determine element type`);
+  }
+  const data = value.$('buf.inner.ptr').asPointerToType(elementTypeId);
+  const size = value.$('len').asUint32();
+  const elements: Value[] = [];
+  for (let i = 0; i < size; ++i) {
+    elements.push(data.$(i));
+  }
+  return elements;
+}
+
+export function formatRustVectorDeque(wasm: WasmInterface, value: Value) {
+  const elementTypeId = value.extendedTypeInfo?.templateParameters[0]?.typeId;
+  if (!elementTypeId) {
+    throw new Error(`Can't determine element type`);
+  }
+  const data = value.$('buf.inner.ptr').asPointerToType(elementTypeId);
+  const capacity = value.$('buf.inner.cap').asUint32();
+  const head = value.$('head').asUint32();
+  const size = value.$('len').asUint32();
+  const elements: Value[] = [];
+  for (let i = 0; i < size; ++i) {
+    elements.push(data.$((head + i) % capacity));
+  }
+  return elements;
+}
+
+export function formatRustStringSlice(wasm: WasmInterface, value: Value) {
+  const data = value.$('data_ptr').asUint32();
+  const size = value.$('length').asUint32();
+  const bytes = wasm.readMemory(data, Math.min(size, Constants.MAX_STRING_LEN));
+  const decoder = new TextDecoder();
+  return formattedStringResult(bytes, decoder.decode.bind(decoder));
+}
+
+export function formatRustString(wasm: WasmInterface, value: Value) {
+  const data = value.$('vec.buf.inner.ptr').asUint32();
+  const size = value.$('vec.len').asUint32();
+  const bytes = wasm.readMemory(data, Math.min(size, Constants.MAX_STRING_LEN));
+  const decoder = new TextDecoder();
+  return formattedStringResult(bytes, decoder.decode.bind(decoder));
+}
+
+export function formatRustRcPointer(wasm: WasmInterface, value: Value): { [key: string]: Value | null | number; } {
+  const box = value.$('ptr.pointer.*');
+  const boxedValue = box.$('value');
+  const strongCount = box.$('strong').asUint32();
+  const weakCount = box.$('weak').asUint32() - 1; // Rc::weak_count() substracts one
+  if (!strongCount) {
+    return { '0x0': null };
+  }
+  return {
+    [`0x${boxedValue.location.toString(16)}`]: boxedValue,
+    ['strong_count']: strongCount,
+    ['weak_count']: weakCount,
+  };
+}
+
+export function formatRustHashMap(wasm: WasmInterface, value: Value): { key: Value; value: Value; }[] {
+  return formatRustHashMapBase(wasm, value.$('base'));
+}
+
+export function formatRustHashMapBase(wasm: WasmInterface, value: Value): { key: Value; value: Value; }[] {
+  const rawTable = value.$('table');
+  const elementTypeId = rawTable.extendedTypeInfo?.templateParameters[0]?.typeId;
+  if (!elementTypeId) {
+    throw new Error(`Can't determine element type`);
+  }
+  const rawTableInner = rawTable.$('table');
+  const bucketMask = rawTableInner.$('bucket_mask').asUint32();
+  const dataPointer = rawTableInner.$('ctrl.pointer').asPointerToType(elementTypeId);
+  const tagsView = rawTableInner.$('ctrl.pointer.*').asDataView(0, bucketMask + 1);
+  const elements: { key: Value; value: Value; }[] = [];
+  for (let i = 0; i <= bucketMask; i++) {
+    if ((tagsView.getUint8(i) & 0x80) === 0) {
+      const keyValuePair = dataPointer.$(-(i + 1));
+      elements.push({
+        key: keyValuePair.$('__0'),
+        value: keyValuePair.$('__1'),
+      });
+    }
+  }
+  return elements;
+}
+
+export function formatRustHashSet(wasm: WasmInterface, value: Value): Value[] {
+  return formatRustHashSetBase(wasm, value.$('base'));
+}
+
+export function formatRustHashSetBase(wasm: WasmInterface, value: Value): Value[] {
+  return formatRustHashMapBase(wasm, value.$('map')).map(element => element.key);
+}
+
+function getDiscriminatorValue(value: Value, discriminatorMember: FieldInfo) {
+  const discriminatorValue = value.asType(discriminatorMember.typeId, discriminatorMember.offset);
+  switch (discriminatorValue.size) {
+    case 1:
+      return BigInt(discriminatorValue.asUint8());
+    case 2:
+      return BigInt(discriminatorValue.asUint16());
+    case 4:
+      return BigInt(discriminatorValue.asUint32());
+    case 8:
+      return discriminatorValue.asUint64();
+  }
+  throw new Error(`Invalid size ${discriminatorValue.size} from discriminator member`);
+}
+
+CustomFormatters.addFormatter({ types: rustTypeMatch(hasVariantParts), format: formatRustSumType });
+CustomFormatters.addFormatter({ types: rustTypeMatch(hasOnlyRustTupleLikeMembers), format: formatRustTuple });
+CustomFormatters.addFormatter({ types: rustTypeMatch(/^&\[.+\]$/), format: formatRustArraySlice });
+CustomFormatters.addFormatter({ types: rustTypeMatch(/^alloc::vec::Vec<.+>$/), format: formatRustVector });
+CustomFormatters.addFormatter({ types: rustTypeMatch(/^alloc::collections::vec_deque::VecDeque<.+>$/), format: formatRustVectorDeque });
+CustomFormatters.addFormatter({ types: rustTypeMatch('&str'), format: formatRustStringSlice });
+CustomFormatters.addFormatter({ types: rustTypeMatch('alloc::string::String'), format: formatRustString });
+CustomFormatters.addFormatter({ types: rustTypeMatch(/^alloc::rc::(Rc|Weak)<.+>$/), format: formatRustRcPointer });
+CustomFormatters.addFormatter({ types: rustTypeMatch(/^std::collections::hash::map::HashMap<.+>$/), format: formatRustHashMap });
+CustomFormatters.addFormatter({ types: rustTypeMatch(/^hashbrown::map::HashMap<.+>$/), format: formatRustHashMapBase });
+CustomFormatters.addFormatter({ types: rustTypeMatch(/^std::collections::hash::set::HashSet<.+>$/), format: formatRustHashSet });
+CustomFormatters.addFormatter({ types: rustTypeMatch(/^hashbrown::set::HashSet<.+>$/), format: formatRustHashSetBase });

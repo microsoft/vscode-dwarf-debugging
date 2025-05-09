@@ -1,0 +1,22 @@
+# This file is based on a file from revision cf3a5c70b97b388fff3490b62f1bdaaa6a26f8e1 
+# of the Chrome DevTools C/C++ Debugging Extension, see the wasm/symbols-backend/LICENSE file.
+#
+# https://github.com/ChromeDevTools/devtools-frontend/blob/main/extensions/cxx_debugging/e2e/tests/test_big_dwo.yaml
+
+name: Successfully loads large dwo files
+source_file: resources/huge-source-file.cc
+use_dwo: true
+flags: [
+  [-g, -fdebug-compilation-dir=., -gdwarf-5, -sWASM_BIGINT, -sERROR_ON_WASM_CHANGES_AFTER_LINK, -gsplit-dwarf, -gpubnames]]
+script:
+  - reason: setup
+    actions:
+    - file: huge-source-file.cc
+      action: set_breakpoint
+      breakpoint: 28
+  - reason: breakpoint
+    file: huge-source-file.cc
+    line: 28
+    variables:
+      - name: Local.value
+        value: -2147483648

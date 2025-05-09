@@ -129,6 +129,10 @@ dist
 .yarn/install-state.gz
 .pnp.*
 
-/chrome-cxx/mnt/extension
-/chrome-cxx/mnt/extension-api.d.ts
 /dist
+/wasm/e2e.build/
+/wasm/symbols-backend.build/
+
+/chrome-cxx
+
+compile_commands.json

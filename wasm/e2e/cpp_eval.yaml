@@ -1,0 +1,38 @@
+# This file is based on a file from revision cf3a5c70b97b388fff3490b62f1bdaaa6a26f8e1 
+# of the Chrome DevTools C/C++ Debugging Extension, see the wasm/symbols-backend/LICENSE file.
+#
+# https://github.com/ChromeDevTools/devtools-frontend/blob/main/extensions/cxx_debugging/e2e/tests/cpp_eval.yaml
+
+name: Cpp expression evaluation
+source_file: resources/stepping-with-state.c
+flags: [
+  [-g, -fdebug-compilation-dir=., -fno-limit-debug-info, -sWASM_BIGINT, -sERROR_ON_WASM_CHANGES_AFTER_LINK],
+  [-g, -fdebug-compilation-dir=., -gdwarf-5, -sWASM_BIGINT, -sERROR_ON_WASM_CHANGES_AFTER_LINK],
+  [-g, -fdebug-compilation-dir=., -gdwarf-5, -sWASM_BIGINT, -sERROR_ON_WASM_CHANGES_AFTER_LINK, -gsplit-dwarf, -gpubnames]]
+use_dwo: true
+script:
+  - reason: setup
+    actions:
+    - file: stepping-with-state.c
+      action: set_breakpoint
+      breakpoint: 16
+  - reason: breakpoint
+    file: stepping-with-state.c
+    line: 16
+    evaluations:
+      - expression: n * 3
+        value: 30
+      - expression: '*&n'
+        value: 10
+      - expression: 1 + 2
+        value: 3
+      - expression: 1 + 2*3
+        value: 7
+      - expression: 1 + (2 - 3)
+        value: 0
+      - expression: 1 == 2
+        value: false
+      - expression: 1 == 1
+        value: true
+      - expression: (char)65
+        value: "'A'"

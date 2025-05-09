@@ -1,0 +1,32 @@
+# This file is based on a file from revision cf3a5c70b97b388fff3490b62f1bdaaa6a26f8e1 
+# of the Chrome DevTools C/C++ Debugging Extension, see the wasm/symbols-backend/LICENSE file.
+#
+# https://github.com/ChromeDevTools/devtools-frontend/blob/main/extensions/cxx_debugging/e2e/tests/scope_view_primitives.yaml
+
+name: Scope view formats primitive types correctly
+# This test checks that the scope view displays
+# integers, chars, float and doubles correctly
+source_file: resources/scope-view-primitives.c
+flags: [
+  [-g, -fdebug-compilation-dir=., -fno-limit-debug-info, -sWASM_BIGINT, -sERROR_ON_WASM_CHANGES_AFTER_LINK],
+  [-g, -fdebug-compilation-dir=., -fno-limit-debug-info, -sWASM_BIGINT, -sERROR_ON_WASM_CHANGES_AFTER_LINK, -gsplit-dwarf],
+  [-g, -fdebug-compilation-dir=., -gdwarf-5, -sWASM_BIGINT, -sERROR_ON_WASM_CHANGES_AFTER_LINK],
+  [-g, -fdebug-compilation-dir=., -gdwarf-5, -sWASM_BIGINT, -sERROR_ON_WASM_CHANGES_AFTER_LINK, -gsplit-dwarf, -gpubnames]]
+script:
+  - reason: setup
+    actions:
+    - file: scope-view-primitives.c
+      action: set_breakpoint
+      breakpoint: 14
+  - reason: breakpoint
+    file: scope-view-primitives.c
+    line: 14
+    variables:
+      - name: Local.i
+        value: 10
+      - name: Local.c
+        value: "'a'"
+      - name: Local.f
+        value: 1.10000002
+      - name: Local.d
+        value: 1.2
