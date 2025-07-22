@@ -17,7 +17,7 @@
     "@chialab/esbuild-plugin-meta-url": "^0.17.7",
     "@types/emscripten": "^1.39.7",
     "@types/node": "^20.6.0",
-    "esbuild": "^0.19.2",
+    "esbuild": "^0.25.0",
     "rimraf": "^5.0.1",
     "tsx": "^3.12.10",
     "typescript": "^5.2.2"
