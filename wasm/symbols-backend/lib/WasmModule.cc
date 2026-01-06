@@ -308,8 +308,9 @@ std::vector<int32_t> WasmModule::GetMappedLines(
   std::vector<int32_t> line_numbers;
   for (const lldb_private::SymbolContext& line_sc :
        line_entry_scs.SymbolContexts()) {
-    assert(line_sc.line_entry.IsValid());
-    line_numbers.push_back(line_sc.line_entry.line);
+    if (line_sc.line_entry.IsValid() && line_sc.line_entry.line > 0) {
+      line_numbers.push_back(line_sc.line_entry.line);
+    }
   }
 
   std::sort(line_numbers.begin(), line_numbers.end());

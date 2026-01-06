@@ -48,15 +48,11 @@ describe('SymbolsBackend', () => {
 
       const { rawLocationRanges: [{ startOffset: codeOffset }] } = okReponse(plugin.SourceLocationToRawLocation('1', 'app.rs', 32, -1));
 
-      const debuggerProxy = new TestWasmInterface();
-      debuggerProxy.memory = new SharedArrayBuffer(32);
-      debuggerProxy.locals.set(2, { type: 'i32', value: 4 });
-
       const { root: animalType, typeInfos } = okReponse(
         plugin.EvaluateExpression(
           { rawModuleId: '1', codeOffset, inlineFrameIndex: 0 },
           'a',
-          debuggerProxy,
+          createDebuggerProxyWasmInterface(),
         )
       );
 
@@ -87,17 +83,12 @@ describe('SymbolsBackend', () => {
     try {
       okReponse(plugin.AddRawModule('1', 'app_Rust_application_0.wasm'));
 
-      const { rawLocationRanges: [{ startOffset: codeOffset }] } = okReponse(plugin.SourceLocationToRawLocation('1', 'app.rs', 38, -1));
-
-      const debuggerProxy = new TestWasmInterface();
-      debuggerProxy.memory = new SharedArrayBuffer(32);
-      debuggerProxy.locals.set(2, { type: 'i32', value: 4 });
-
+      const { rawLocationRanges: [{ startOffset: codeOffset }] } = okReponse(plugin.SourceLocationToRawLocation('1', 'app.rs', 37, -1));
       const { root: vectorType, typeInfos } = okReponse(
         plugin.EvaluateExpression(
           { rawModuleId: '1', codeOffset, inlineFrameIndex: 0 },
           'vector',
-          debuggerProxy,
+          createDebuggerProxyWasmInterface(),
         )
       );
 
@@ -127,4 +118,11 @@ function okReponse<T extends ResponseWithError>(response: T) {
     assert.fail(`Expect succesfull response, got ${response.error.code}: ${response.error.message}`);
   }
   return response;
+}
+
+function createDebuggerProxyWasmInterface(memorySize = 4096, numberOfLocals = 32) {
+  return Object.assign(new TestWasmInterface(), {
+    memory: new SharedArrayBuffer(memorySize),
+    locals: new Map(Array.from({ length: numberOfLocals }).map((_, i) => [i, { type: 'i32', value: 0 }])),
+  });
 }

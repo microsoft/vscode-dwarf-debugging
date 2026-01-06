@@ -1,4 +1,4 @@
-import { parentPort } from 'worker_threads';
+const { parentPort } = require('worker_threads');
 
 let signal, commandPort, instance;
 
