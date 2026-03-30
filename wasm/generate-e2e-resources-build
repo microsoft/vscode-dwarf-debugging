@@ -31,7 +31,7 @@ out(`  description = Generating wasip1 runner, creating $out"\n\n`);
 
 
 for (const specFilePath of inputFiles) {
-  const { name, source_file: sourceFile, flags, use_dwo: useDwo } = yaml.load(fs.readFileSync(specFilePath, 'utf8'));
+  const { name, source_file: sourceFile, flags } = yaml.load(fs.readFileSync(specFilePath, 'utf8'));
 
   assert(specFilePath, typeof name === 'string', `Expected top level string property 'name'`);
   assert(specFilePath, typeof sourceFile === 'string', `Expected top level string property 'source_file'`);
@@ -67,7 +67,7 @@ for (const specFilePath of inputFiles) {
     out(`build ${outputFile}.o${additionalObjOutput}: build_wasm ${encodeFilePath(sourceFilePath)}\n`);
     out(`  compiler = ${compiler} -c\n`);
     out(`  flags = ${compileFlags}\n\n`);
-    if (hasSplitDwarf && !useDwo) {
+    if (hasSplitDwarf) {
       out(`build ${outputFile}.wasm.dwp: build_dwp ${outputFile}.dwo\n\n`);
     }
   }

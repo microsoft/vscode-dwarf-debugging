@@ -57,12 +57,10 @@ struct FunctionInfo {
 };
 
 struct SourceInfo {
-  SourceInfo(llvm::SmallSet<std::string, 1> sources,
-             llvm::SmallSet<std::string, 1> dwos)
-      : sources(sources), dwos(dwos) {}
+  SourceInfo(llvm::SmallSet<std::string, 1> sources)
+      : sources(sources) {}
 
   llvm::SmallSet<std::string, 1> sources;
-  llvm::SmallSet<std::string, 1> dwos;
 };
 
 struct ExpressionResult;

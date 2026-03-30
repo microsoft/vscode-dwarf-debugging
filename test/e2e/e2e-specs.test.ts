@@ -16,7 +16,6 @@ interface TestSpec {
   only?: boolean;
   skip?: boolean;
   source_file: string;
-  use_dwo?: boolean;
   flags: string[][];
   script: {
     reason: string;

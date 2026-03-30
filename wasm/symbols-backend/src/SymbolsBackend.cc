@@ -193,7 +193,6 @@ EMSCRIPTEN_BINDINGS(DWARFSymbolsPlugin) {
   emscripten::class_<symbols_backend::api::AddRawModuleResponse>("AddRawModuleResponse")
       .constructor<>()
       .property("sources", &symbols_backend::api::AddRawModuleResponse::GetSources, &symbols_backend::api::AddRawModuleResponse::SetSources)
-      .property("dwos", &symbols_backend::api::AddRawModuleResponse::GetDwos, &symbols_backend::api::AddRawModuleResponse::SetDwos)
       .property("error", OptionalGetter(&symbols_backend::api::AddRawModuleResponse::GetError), OptionalSetter(&symbols_backend::api::AddRawModuleResponse::SetError))
       ;
 

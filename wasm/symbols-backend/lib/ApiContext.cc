@@ -130,7 +130,6 @@ AddRawModuleResponse ApiContext::AddRawModule(
     auto source_info = m->GetSourceScripts();
     response.SetSources(
         {source_info.sources.begin(), source_info.sources.end()});
-    response.SetDwos({source_info.dwos.begin(), source_info.dwos.end()});
   } else {
     response.SetError(MakeError(Error::Code::kInternalError,
                                 "Unable to load file '" + path + "'"));

@@ -102,52 +102,12 @@ export class DWARFLanguageExtensionPlugin implements Chrome.DevTools.LanguageExt
       await this.resourceLoader.loadSymbols(rawModuleId, rawModule, symbolsURL, backend.FS, this.hostInterface);
     const moduleInfo = new ModuleInfo(symbolsURL.href, symbolsFileName, symbolsDwpFileName, backend);
 
-    const { sources, dwos } = moduleInfo.dwarfSymbolsPlugin.AddRawModule(rawModuleId, symbolsFileName);
+    const { sources } = moduleInfo.dwarfSymbolsPlugin.AddRawModule(rawModuleId, symbolsFileName);
     for (const fileName of sources) {
       const fileURL = resolveSourcePathToURL(fileName, symbolsURL);
       moduleInfo.fileNameToUrl.set(fileName, fileURL.href);
       moduleInfo.urlToFileName.set(fileURL.href, fileName);
     };
-
-    for (const dwoFile of dwos) {
-      const absolutePath = dwoFile.startsWith('/') ? dwoFile : '/' + dwoFile;
-      const pathSplit = absolutePath.split('/');
-      const fileName = pathSplit.pop() as string;
-      const parentDirectory = pathSplit.join('/');
-
-      const dwoURL = new URL(dwoFile, symbolsURL).href;
-      const dwoResponse = await fetch(dwoURL, { mode: 'no-cors' })
-        .catch((e: Error) => ({ ok: false, status: -1, statusText: e.message } as const));
-
-      if (dwoResponse.ok) {
-        const dwoData = await dwoResponse.arrayBuffer();
-        void this.hostInterface.reportResourceLoad(dwoURL, { success: true, size: dwoData.byteLength });
-
-        // Sometimes these stick around.
-        try {
-          backend.FS.unlink(absolutePath);
-        } catch {
-        }
-        // Ensure directory exists
-        if (parentDirectory.length > 1) {
-          // TypeScript doesn't know about createPath
-          // @ts-expect-error doesn't exit on types
-          backend.FS.createPath('/', parentDirectory.substring(1), true, true);
-        }
-
-        backend.FS.createDataFile(
-          parentDirectory,
-          fileName,
-          new Uint8Array(dwoData),
-          true /* canRead */,
-          false /* canWrite */,
-          true /* canOwn */,
-        );
-      } else {
-        const dwoError = dwoResponse.statusText || `status code ${dwoResponse.status}`;
-        void this.hostInterface.reportResourceLoad(dwoURL, { success: false, errorMessage: `Failed to fetch dwo file: ${dwoError}` });
-      }
-    }
 
     return moduleInfo;
   }
