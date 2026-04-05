@@ -68,6 +68,7 @@ TEST(WasmModuleTest, HelloAddScript) {
   auto scripts = (*module)->GetSourceScripts();
   llvm::SmallVector<llvm::StringRef, 2> filenames;
   EXPECT_EQ(scripts.sources.size(), 2u);
+  EXPECT_EQ(scripts.dwos.size(), 0u);
   for (auto& s : scripts.sources) {
     filenames.push_back(s);
   }

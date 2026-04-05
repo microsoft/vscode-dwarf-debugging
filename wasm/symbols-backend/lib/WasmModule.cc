@@ -134,6 +134,7 @@ bool WasmModule::Valid() const {
 
 SourceInfo WasmModule::GetSourceScripts() const {
   llvm::SmallSet<std::string, 1> compile_units;
+  llvm::SmallSet<std::string, 1> dwos;
   llvm::SmallSet<std::pair<llvm::StringRef, llvm::StringRef>, 1> all_files;
   for (size_t idx = 0; idx < module_->GetNumCompileUnits(); idx++) {
     auto compile_unit = module_->GetCompileUnitAtIndex(idx);
@@ -148,8 +149,20 @@ SourceInfo WasmModule::GetSourceScripts() const {
       }
       compile_units.insert(f.GetPath());
     }
+
+    // Cast user data to DwarfUnit
+    DWARFCompileUnit* dwarf_cu =
+        static_cast<DWARFCompileUnit*>(compile_unit->GetUserData());
+    if (dwarf_cu && dwarf_cu->GetVersion() >= 5) {
+      // Might need to lazy load this .dwo (only works for DWARF5)
+      llvm::SmallVector<std::string, 2> missing_symbols;
+      auto dwo_name = GetDWOName(*dwarf_cu);
+      if (!dwo_name.empty()) {
+        dwos.insert(dwo_name.str());
+      }
+    }
   }
-  return {compile_units};
+  return {compile_units, dwos};
 }
 
 namespace {

@@ -382,6 +382,7 @@ class TypeInfo {
 class AddRawModuleResponse {
  private:
   std::vector<std::string> sources_ = {}; // The original source files the raw module was compiled from. Filenames are in URL format
+  std::vector<std::string> dwos_ = {}; // DWO filenames that might be lazily loaded. Used internally by the extension to set up emscripten filesystem.
   llvm::Optional<Error> error_ = {}; // Error details if the raw module couldn't be handled
 
  public:
@@ -390,6 +391,11 @@ class AddRawModuleResponse {
   std::vector<std::string> GetSources() const { return sources_; }
   AddRawModuleResponse &SetSources(std::vector<std::string> value) {
     sources_ = std::move(value);
+    return *this;
+  }
+  std::vector<std::string> GetDwos() const { return dwos_; }
+  AddRawModuleResponse &SetDwos(std::vector<std::string> value) {
+    dwos_ = std::move(value);
     return *this;
   }
   llvm::Optional<Error> GetError() const { return error_; }

@@ -101,6 +101,7 @@ export interface TypeInfo extends EmbindObject {
 
 export interface AddRawModuleResponse extends EmbindObject {
   sources: Vector<string>;
+  dwos: Vector<string>;
   error: Error | undefined;
 }
 
