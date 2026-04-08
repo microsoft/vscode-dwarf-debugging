@@ -109,19 +109,14 @@ export class DWARFLanguageExtensionPlugin implements Chrome.DevTools.LanguageExt
       moduleInfo.urlToFileName.set(fileURL.href, fileName);
     };
 
-    for (const dwoFile of dwos) {
-      const absolutePath = dwoFile.startsWith('/') ? dwoFile : '/' + dwoFile;
-      const pathSplit = absolutePath.split('/');
-      const fileName = pathSplit.pop() as string;
-      const parentDirectory = pathSplit.join('/');
-
-      const dwoURL = new URL(dwoFile, symbolsURL).href;
-      const dwoResponse = await fetch(dwoURL, { mode: 'no-cors' })
-        .catch((e: Error) => ({ ok: false, status: -1, statusText: e.message } as const));
-
-      if (dwoResponse.ok) {
-        const dwoData = await dwoResponse.arrayBuffer();
-        void this.hostInterface.reportResourceLoad(dwoURL, { success: true, size: dwoData.byteLength });
+    // Set up lazy dwo files if we are running on a worker
+    if (typeof global === 'undefined' && typeof importScripts === 'function' &&
+      typeof XMLHttpRequest !== 'undefined') {
+      for (const dwoFile of dwos) {
+        const absolutePath = dwoFile.startsWith('/') ? dwoFile : '/' + dwoFile;
+        const pathSplit = absolutePath.split('/');
+        const fileName = pathSplit.pop() as string;
+        const parentDirectory = pathSplit.join('/');
 
         // Sometimes these stick around.
         try {
@@ -135,17 +130,22 @@ export class DWARFLanguageExtensionPlugin implements Chrome.DevTools.LanguageExt
           backend.FS.createPath('/', parentDirectory.substring(1), true, true);
         }
 
-        backend.FS.createDataFile(
-          parentDirectory,
-          fileName,
-          new Uint8Array(dwoData),
-          true /* canRead */,
-          false /* canWrite */,
-          true /* canOwn */,
-        );
-      } else {
-        const dwoError = dwoResponse.statusText || `status code ${dwoResponse.status}`;
-        void this.hostInterface.reportResourceLoad(dwoURL, { success: false, errorMessage: `Failed to fetch dwo file: ${dwoError}` });
+        const dwoURL = new URL(dwoFile, symbolsURL).href;
+        const node = backend.FS.createLazyFile(parentDirectory, fileName, dwoURL, true, false) as LazyFSNode;
+        const cacheLength = node.contents.cacheLength;
+        const wrapper = (): void => {
+          try {
+            cacheLength.apply(node.contents);
+            void this.hostInterface.reportResourceLoad(dwoURL, { success: true, size: node.contents.length });
+          } catch (e) {
+            void this.hostInterface.reportResourceLoad(dwoURL, { success: false, errorMessage: (e as Error).message });
+            // Rethrow any error fetching the content as errno 44 (EEXIST)
+            // TypeScript doesn't know about the ErrnoError constructor
+            // @ts-expect-error doesn't exit on types
+            throw new backend.FS.ErrnoError(44);
+          }
+        };
+        node.contents.cacheLength = wrapper;
       }
     }
 
