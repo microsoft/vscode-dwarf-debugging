@@ -5,9 +5,9 @@ import {
   Channel,
   WorkerInterface,
   WorkerRPC,
-} from '../chrome-cxx/mnt/extension/WorkerRPC';
+} from './WorkerRPC';
 
-export type * from '../chrome-cxx/mnt/extension/WorkerRPC';
+export type * from './WorkerRPC';
 
 /** Utility type to get the worker's return value from a method name. */
 export type MethodReturn<T extends keyof WorkerInterface> = ReturnType<
@@ -21,7 +21,19 @@ export interface IWasmWorker {
   dispose(): Promise<void>;
 }
 
-export function spawn(hostInterface: AsyncHostInterface): IWasmWorker {
+export type WithOptionalMethods<T, P> = T | Pick<T, Exclude<keyof T, P>>;
+
+export function spawn(hostInterface: WithOptionalMethods<AsyncHostInterface, 'reportResourceLoad'>): IWasmWorker {
+
+  // The ms-vscode.js-debug extension currently invokes spawn without 
+  // the reportResourceLoad method which causes the worker to fail.
+  if (!('reportResourceLoad' in hostInterface)) {
+    hostInterface = {
+      ...hostInterface,
+      async reportResourceLoad(_resourceUrl, _status) { }
+    };
+  }
+
   const worker = new Worker(join(__dirname, 'worker.js'));
   worker.on('message', (data) => channel.onmessage?.(new MessageEvent('message', { data })));
 

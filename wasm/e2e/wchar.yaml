@@ -1,0 +1,65 @@
+# This file is based on a file from revision cf3a5c70b97b388fff3490b62f1bdaaa6a26f8e1 
+# of the Chrome DevTools C/C++ Debugging Extension, see the wasm/symbols-backend/LICENSE file.
+#
+# https://github.com/ChromeDevTools/devtools-frontend/blob/main/extensions/cxx_debugging/e2e/tests/wchar.yaml
+
+name: Test Wide-Character Strings
+source_file: resources/wchar.cc
+flags: [
+  [-g, -fdebug-compilation-dir=., -fno-limit-debug-info, -sWASM_BIGINT, -sERROR_ON_WASM_CHANGES_AFTER_LINK],
+  [-g, -fdebug-compilation-dir=., -fno-limit-debug-info, -sWASM_BIGINT, -sERROR_ON_WASM_CHANGES_AFTER_LINK, -gsplit-dwarf],
+  [-g, -fdebug-compilation-dir=., -gdwarf-5, -sWASM_BIGINT, -sERROR_ON_WASM_CHANGES_AFTER_LINK],
+  [-g, -fdebug-compilation-dir=., -gdwarf-5, -sWASM_BIGINT, -sERROR_ON_WASM_CHANGES_AFTER_LINK, -gsplit-dwarf, -gpubnames]]
+script:
+  - reason: setup
+    actions:
+    - file: wchar.cc
+      action: set_breakpoint
+      breakpoint: 21
+  - reason: breakpoint
+    file: wchar.cc
+    line: 21
+    variables:
+      - name: Local.cxx_str
+      - name: Local.cxx_str.size
+        value: 5
+      - name: Local.cxx_str.string
+        value: '"abcde"'
+      - name: Local.short_cxx_str.size
+        value: 1
+      - name: Local.short_cxx_str.string
+        value: '"a"'
+      - name: Local.c_str
+        type: 'const wchar_t *'
+      - name: Local.c_str.string
+        value: '"abcde"'
+      - name: Local.c_str.size
+        value: 5
+      - name: Local.u16_cxx_str.size
+        value: 5
+      - name: Local.u16_cxx_str.string
+        value: '"abcde"'
+      - name: Local.u16_short_cxx_str.size
+        value: 1
+      - name: Local.u16_short_cxx_str.string
+        value: '"a"'
+      - name: Local.u16_c_str
+        type: 'const char16_t *'
+      - name: Local.u16_c_str.string
+        value: '"abcde"'
+      - name: Local.u16_c_str.size
+        value: 5
+      - name: Local.u32_cxx_str.size
+        value: 5
+      - name: Local.u32_cxx_str.string
+        value: '"abcde"'
+      - name: Local.u32_short_cxx_str.size
+        value: 1
+      - name: Local.u32_short_cxx_str.string
+        value: '"a"'
+      - name: Local.u32_c_str
+        type: 'const char32_t *'
+      - name: Local.u32_c_str.size
+        value: 5
+      - name: Local.u32_c_str.string
+        value: '"abcde"'

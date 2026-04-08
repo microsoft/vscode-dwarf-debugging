@@ -1,14 +1,13 @@
-import { promises as fs } from "fs";
-import { join } from "path";
-import { fileURLToPath } from "url";
-import { parentPort } from "worker_threads";
-import { RPCInterface } from "../chrome-cxx/mnt/extension/DevToolsPluginWorker";
-import { ResourceLoader } from "../chrome-cxx/mnt/extension/MEMFSResourceLoader";
+import { promises as fs } from 'fs';
+import { fileURLToPath } from 'url';
+import { parentPort } from 'worker_threads';
+import { ResourceLoader } from './ResourceLoader';
+import { RPCInterface } from './RPCInterface';
 import {
   Channel,
   HostInterface,
   WorkerInterface,
-} from "../chrome-cxx/mnt/extension/WorkerRPC";
+} from './WorkerRPC';
 
 enableFetchToLoadFileUris();
 init();
@@ -32,20 +31,7 @@ function init() {
 
   new RPCInterface(
     channel,
-    new (class extends ResourceLoader {
-      protected override getModuleFileName(rawModuleId: string): string {
-        // same logic as the parent method, but btoa doesn't exist in node
-        return `${Buffer.from(rawModuleId).toString("base64")}.wasm`.replace(
-          /\//g,
-          "_"
-        );
-      }
-
-      override async createSymbolsBackendModulePromise(): Promise<WebAssembly.Module> {
-        const file = await fs.readFile(join(__dirname, "SymbolsBackend.wasm"));
-        return WebAssembly.compile(file);
-      }
-    })()
+    new ResourceLoader()
   );
 }
 
@@ -56,7 +42,7 @@ function init() {
  */
 function enableFetchToLoadFileUris() {
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async (...args) => {
+  globalThis.fetch = async (...args: Parameters<typeof fetch>) => {
     const url = args[0];
     if (typeof url !== "string" || !url.startsWith("file:///")) {
       return originalFetch(...args);
@@ -89,11 +75,12 @@ function enableFetchToLoadFileUris() {
       blob: () => {
         throw new Error("not implemented");
       },
+      bytes: () => Promise.resolve(new Uint8Array(contents)),
       formData: () => {
         throw new Error("not implemented");
       },
       json: () => Promise.resolve(JSON.parse(contents.toString())),
-      arrayBuffer: () => Promise.resolve(contents),
+      arrayBuffer: () => Promise.resolve(contents.buffer as ArrayBuffer)
     };
 
     return response;

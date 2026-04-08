@@ -5,15 +5,41 @@ This repository publishes an npm module which is used by [js-debug](https://gith
 - For VS Code users, you will be prompted to install the appropriate extension that contains this module when you first step into a WebAssembly file.
 - For users of the js-debug standalone DAP server, you can install the `@vscode/dwarf-debugging` alongside js-debug or somewhere in your [NODE_PATH](https://nodejs.org/api/modules.html#loading-from-the-global-folders).
 
-This project works by compiling the Chrome [C/C++ Debugging Extension](https://github.com/ChromeDevTools/devtools-frontend/tree/main/extensions/cxx_debugging) in a way that is usable by Node.js programs. Fortunately, the extension is architected such that most work is done inside a WebWorker, and making this instead run in a Node worker_thread is not terribly difficult. Appropriate TypeScript types are exposed, and this module is then shimmed into js-debug which 'pretends' to be Devtools.
+This project works by compiling the WebAssembly backend for the Chrome [C/C++ Debugging Extension](https://github.com/ChromeDevTools/devtools-frontend/tree/main/extensions/cxx_debugging) in a way that is usable by Node.js programs. Fortunately, the extension is architected such that most work is done inside a WebWorker, and porting the TypeScript code to instead run in a Node worker_thread is not terribly difficult. Appropriate TypeScript types are exposed, and this module is then shimmed into js-debug which 'pretends' to be Devtools.
 
+In addition for the variable view and the basic `C/C++` expression evaluation support via [lldb-eval](https://github.com/google/lldb-eval) included in the original Chrome C/C++ Debugging Extension the following features has been added:
+
+  - Basic support for `Rust` types, most specifically sum types which couldn't be viewed in the original extension but also better support for core / standard library types like:
+    - `&[T]`
+    - `alloc::vec::Vec<T>`
+    - `alloc::collections::vec_deque::VecDeque<T>`
+    - `&str`
+    - `alloc::string::String`
+    - `alloc::rc::Rc<T>`
+    - `alloc::rc::Weak<T>`
+    - `std::collections::hash::map::HashMap<K, V>`
+    - `std::collections::hash::map::HashSet<T>`
+    
 ## Contributing
 
-### Building
+### Building (using Docker or Podman)
 
 1. Clone this repo, and have Docker or Podman installed.
-2. Run `npm run build`. This will take a while (~1hr depending on how fast your computer is.) Note that for developing you can run individual build steps in their appropriate scripts.
-3. You then have a built module. Run `npm run test` to run some basic tests.
+2. Run `npm i`
+3. Run `npm run build`. This will take a while (~1hr depending on how fast your computer is.) Note that for developing you can run individual build steps in their appropriate scripts.
+4. You then have a built module. Run `npm run test` to run the test suite.
+
+### Building (using local install of build tools and a posix compatible shell)
+
+1. Clone this repo, and have the following dependencies installed on your machine:  
+    - `cmake`, `python3` and `ninja-build`
+    - [Emscripten SDK](https://github.com/emscripten-core/emsdk.git) installed, environment variable `EMSDK` pointing to the root folder of the SDK and version `3.1.14` activated.
+    - `nodejs v20+`
+    - `rust v1.83+` with target `wasm32-wasip1` added (for compiling parts of the test suite)
+2. Run `npm i`
+3. Run `wasm/build.sh && npm run build-meta`. This will take a while but probably shorter than if building with Docker or Podman.
+4. You then have a built module. Run `npm run test` to run the test suite.
+
 
 ### General
 

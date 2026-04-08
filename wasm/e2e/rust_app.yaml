@@ -1,0 +1,154 @@
+name: Rust application
+source_file: resources/app.rs
+flags: [
+  [--target, wasm32-wasip1, -g]]
+script:
+  - reason: setup
+    actions:
+    - file: app.rs
+      action: set_breakpoint
+      breakpoint: 16
+    - file: app.rs
+      action: set_breakpoint
+      breakpoint: 18
+    - file: app.rs
+      action: set_breakpoint
+      breakpoint: 21
+    - file: app.rs
+      action: set_breakpoint
+      breakpoint: 48
+    - file: app.rs
+      action: set_breakpoint
+      breakpoint: 58
+    - file: app.rs
+      action: set_breakpoint
+      breakpoint: 66
+    - file: app.rs
+      action: set_breakpoint
+      breakpoint: 73
+  - reason: breakpoint
+    file: app.rs
+    line: 16
+    variables:
+      - name: Parameter.animal
+        type: app::Animal
+      - name: Parameter.animal.Dog
+        type: app::Animal::Dog
+      - name: Parameter.animal.Dog.0.string
+        value: '"Biscuit"'
+      - name: Parameter.animal.Dog.1
+        value: 8.51
+  - reason: breakpoint
+    file: app.rs
+    line: 18
+    variables:
+      - name: Local.name.string
+        value: '"Biscuit"'
+      - name: Local.weight
+        value: 8.51
+  - reason: breakpoint
+    file: app.rs
+    line: 16
+    variables:
+      - name: Parameter.animal
+        type: app::Animal
+      - name: Parameter.animal.Cat
+        type: app::Animal::Cat
+      - name: Parameter.animal.Cat.name.string
+        value: '"Whiskers"'
+      - name: Parameter.animal.Cat.weight
+        value: 3.15
+  - reason: breakpoint
+    file: app.rs
+    line: 21
+    variables:
+      - name: Local.name.string
+        value: '"Whiskers"'
+      - name: Local.weight
+        value: 3.15
+  - reason: breakpoint
+    file: app.rs
+    line: 48
+    variables:
+      - name: Local.hash_map
+        type: 'std::collections::hash::map::HashMap<int, &str, std::hash::random::RandomState>'
+      - name: Local.hash_map
+        has_element:
+          - name: key
+            value: 1
+          - name: value.string
+            value: '"One"'
+      - name: Local.hash_map
+        has_element:
+          - name: key
+            value: 2
+          - name: value.string
+            value: '"Two"'
+      - name: Local.vector
+        type: 'alloc::vec::Vec<int, alloc::alloc::Global>'
+      - name: Local.vector.0
+        value: 1
+      - name: Local.vector.1
+        value: 2
+      - name: Local.vector.2
+        value: 3
+      - name: Local.vector.3
+        value: 4
+      - name: Local.vector.4
+        value: 5
+      - name: Local.vec_deque
+        type: 'alloc::collections::vec_deque::VecDeque<int, alloc::alloc::Global>'
+      - name: Local.vec_deque.0
+        value: 4
+      - name: Local.vec_deque.1
+        value: 5
+      - name: Local.vec_deque.2
+        value: 1
+      - name: Local.vec_deque.3
+        value: 2
+      - name: Local.vector_slice
+        type: '&[i32]'
+      - name: Local.vector_slice.0
+        value: 2
+      - name: Local.vector_slice.1
+        value: 3
+      - name: Local.string_slice.size
+        value: 3
+      - name: Local.string_slice
+        type: '&str'
+      - name: Local.string_slice.string
+        value: '"scu"'
+  - reason: breakpoint
+    file: app.rs
+    line: 58
+    variables:
+      - name: Local.strong_ref.$0
+        type: app::Point2D
+      - name: Local.strong_ref.$0.x
+        value: 20
+      - name: Local.strong_ref.$0.y
+        value: 40
+      - name: Local.weak_ref_2.$0
+        type: app::Point2D
+      - name: Local.weak_ref_2.$0.x
+        value: 20
+      - name: Local.weak_ref_2.$0.y
+        value: 40
+      - name: Local.weak_ref_2.strong_count
+        value: 1
+      - name: Local.weak_ref_2.weak_count
+        value: 2
+  - reason: breakpoint
+    file: app.rs
+    line: 66
+    variables:
+      - name: Local.weak_ref_2.strong_count
+        value: 1
+      - name: Local.weak_ref_2.weak_count
+        value: 1
+  - reason: breakpoint
+    file: app.rs
+    line: 73
+    variables:
+      - name: Local.weak_ref_2.$0
+        value: null

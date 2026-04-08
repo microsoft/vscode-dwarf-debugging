@@ -1,11 +1,27 @@
 {
+  "editor.tabSize": 2,
   "editor.formatOnSave": true,
-  "editor.defaultFormatter": "esbenp.prettier-vscode",
   "editor.codeActionsOnSave": {
     "source.organizeImports": "explicit"
   },
-
   "nodejs-testing.extensions": [
-    { "extensions": ["ts"], "parameters": ["--loader", "tsx"] }
-  ]
+    {
+      "extensions": [
+        "ts"
+      ],
+      "parameters": [
+        "--import",
+        "tsx"
+      ]
+    }
+  ],
+  "clangd.arguments": [
+    "--query-driver=**/emcc,**/em++,**/clang,**/clang++"
+  ],
+  "[cpp]": {
+    "editor.formatOnSave": false
+  },
+  "[yaml]": {
+    "editor.formatOnSave": false
+  }
 }

@@ -1,7 +1,21 @@
 {
   "compilerOptions": {
     "strict": true,
-    "module": "CommonJS",
-    "target": "ES2021"
-  }
+    "noImplicitAny": true,
+    "target": "ESNext",
+    "module": "NodeNext",
+    "lib": [
+      "WebWorker"
+    ],
+    "allowUnreachableCode": false,
+    "noEmitOnError": true,
+    "allowSyntheticDefaultImports": true,
+    "declaration": true,
+    "sourceMap": true,
+    "outDir": "dist"
+  },
+  "include": [
+    "src/*",
+    "tests/*"
+  ]
 }
