@@ -1,0 +1,102 @@
+// This file is based on a file from revision cf3a5c70b97b388fff3490b62f1bdaaa6a26f8e1 
+// of the Chrome DevTools C/C++ Debugging Extension, see the wasm/symbols-backend/LICENSE file.
+//
+// https://github.com/ChromeDevTools/devtools-frontend/blob/main/extensions/cxx_debugging/src/MEMFSResourceLoader.ts
+
+import { promises as fs } from 'fs';
+import { join } from 'path';
+import type { Chrome } from './ExtensionAPI';
+
+import type * as DWARFSymbols from './DWARFLanguageExtensionPlugin';
+import type { HostInterface } from './WorkerRPC';
+
+export class ResourceLoader implements DWARFSymbols.ResourceLoader {
+  protected async fetchSymbolsData(rawModule: DWARFSymbols.RawModule, url: URL, hostInterface: HostInterface):
+    Promise<{ symbolsData: ArrayBuffer, symbolsDwpData?: ArrayBuffer; }> {
+    if (rawModule.code) {
+      return { symbolsData: rawModule.code, symbolsDwpData: rawModule.dwp };
+    }
+    const symbolsResponse = await fetch(url.href, { mode: 'no-cors' });
+    if (symbolsResponse.ok) {
+      let symbolsDwpResponse = undefined;
+      let symbolsDwpError;
+      const dwpUrl = `${url.href}.dwp`;
+      try {
+        symbolsDwpResponse = await fetch(dwpUrl, { mode: 'no-cors' });
+      } catch (e) {
+        symbolsDwpError = (e as Error).message;
+        // Unclear if this ever happens; usually if the file isn't there we
+        // get a 404 response.
+        console.error(symbolsDwpError);
+      }
+      if (!(symbolsDwpResponse?.ok)) {
+        // Often this won't exist, but remember the missing file because if
+        // we can't find symbol information later it is likely because this
+        // file was missing.
+        this.possiblyMissingSymbols = [`${url.pathname}.dwp`];
+        if (symbolsDwpResponse) {
+          symbolsDwpError = symbolsDwpResponse?.statusText || `status code ${symbolsDwpResponse.status}`;
+        }
+      }
+      const [symbolsData, symbolsDwpData] = await Promise.all([
+        symbolsResponse.arrayBuffer(),
+        symbolsDwpResponse?.ok ? symbolsDwpResponse.arrayBuffer() : undefined,
+      ]);
+      void hostInterface.reportResourceLoad(url.href, { success: true, size: symbolsData.byteLength });
+      if (symbolsDwpData) {
+        void hostInterface.reportResourceLoad(dwpUrl, { success: true, size: symbolsDwpData.byteLength });
+      } else {
+        void hostInterface.reportResourceLoad(
+          dwpUrl, { success: false, errorMessage: `Failed to fetch dwp file: ${symbolsDwpError}` });
+      }
+      return { symbolsData, symbolsDwpData };
+    }
+    const statusText = symbolsResponse.statusText || `status code ${symbolsResponse.status}`;
+    if (rawModule.url !== url.href) {
+      const errorMessage = `NotFoundError: Unable to load debug symbols from '${url}' for the WebAssembly module '${rawModule.url}' (${statusText}), double-check the parameter to -gseparate-dwarf in your Emscripten link step`;
+      void hostInterface.reportResourceLoad(url.href, { success: false, errorMessage });
+      throw new Error(errorMessage);
+    }
+    const errorMessage = `NotFoundError: Unable to load debug symbols from '${url}' (${statusText})`;
+    void hostInterface.reportResourceLoad(url.href, { success: false, errorMessage });
+    throw new Error(errorMessage);
+  }
+
+  protected getModuleFileName(rawModuleId: string): string {
+    return `${Buffer.from(rawModuleId).toString("base64")}.wasm`.replace(
+      /\//g,
+      "_"
+    );
+  }
+
+  async loadSymbols(
+    rawModuleId: string, rawModule: Chrome.DevTools.RawModule, symbolsURL: URL, fileSystem: typeof FS,
+    hostInterface: HostInterface): Promise<{ symbolsFileName: string, symbolsDwpFileName: string | undefined; }> {
+    const { symbolsData, symbolsDwpData } = await this.fetchSymbolsData(rawModule, symbolsURL, hostInterface);
+    const symbolsFileName = this.getModuleFileName(rawModuleId);
+    const symbolsDwpFileName = symbolsDwpData && `${symbolsFileName}.dwp`;
+
+    // This file is sometimes preserved on reload, causing problems.
+    try {
+      fileSystem.unlink('/' + symbolsFileName);
+    } catch {
+    }
+
+    fileSystem.createDataFile(
+      '/', symbolsFileName, new Uint8Array(symbolsData), true /* canRead */, false /* canWrite */, true /* canOwn */);
+    if (symbolsDwpData && symbolsDwpFileName) {
+      fileSystem.createDataFile(
+        '/', symbolsDwpFileName, new Uint8Array(symbolsDwpData), true /* canRead */, false /* canWrite */,
+        true /* canOwn */);
+    }
+
+    return { symbolsFileName, symbolsDwpFileName };
+  }
+
+  async createSymbolsBackendModulePromise(): Promise<WebAssembly.Module> {
+    const file = await fs.readFile(join(__dirname, "SymbolsBackend.wasm"));
+    return WebAssembly.compile(file);
+  }
+
+  possiblyMissingSymbols?: string[];
+}
