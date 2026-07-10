@@ -26,4 +26,4 @@ RUN gclient sync
 RUN sed -i 's/ENVIRONMENT=web,worker/ENVIRONMENT=node/' /devtools/devtools-frontend/extensions/cxx_debugging/src/CMakeLists.txt
 
 WORKDIR /devtools/devtools-frontend/extensions/cxx_debugging
-RUN ./tools/bootstrap.py -no-check -no-goma ../../out
+RUN ./tools/bootstrap.py -no-check ../../out

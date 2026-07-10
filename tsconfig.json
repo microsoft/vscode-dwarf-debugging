@@ -3,5 +3,10 @@
     "strict": true,
     "module": "CommonJS",
     "target": "ES2021"
-  }
+  },
+  "exclude": [
+    "node_modules",
+    "dist",
+    "chrome-cxx"
+  ]
 }
