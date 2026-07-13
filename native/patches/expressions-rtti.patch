@@ -1,0 +1,125 @@
+diff --git a/extensions/cxx_debugging/lib/Expressions.cc b/extensions/cxx_debugging/lib/Expressions.cc
+index 3fe1ca5f..6720c1ec 100644
+--- a/extensions/cxx_debugging/lib/Expressions.cc
++++ b/extensions/cxx_debugging/lib/Expressions.cc
+@@ -95,6 +95,57 @@ llvm::Optional<llvm::Error> CheckError(lldb::SBValue value) {
+   return llvm::createStringError(llvm::inconvertibleErrorCode(), message);
+ }
+ 
++// Parse an Itanium type_info::name() mangled type name (e.g. "7Derived" or
++// "N3foo7DerivedE") into a qualified source name ("Derived", "foo::Derived").
++// Handles the unqualified and nested-name cases; returns empty for forms we
++// don't resolve here (templates, etc.).
++static std::string DemangleTypeInfoName(llvm::StringRef s) {
++  auto is_digit = [](char c) { return c >= '0' && c <= '9'; };
++  auto read_part = [&](llvm::StringRef& r) -> std::string {
++    size_t i = 0;
++    while (i < r.size() && is_digit(r[i])) {
++      ++i;
++    }
++    if (i == 0) {
++      return {};
++    }
++    unsigned len = 0;
++    if (r.substr(0, i).getAsInteger(10, len)) {
++      return {};
++    }
++    r = r.substr(i);
++    if (len == 0 || len > r.size()) {
++      return {};
++    }
++    std::string part = r.substr(0, len).str();
++    r = r.substr(len);
++    return part;
++  };
++  if (s.empty()) {
++    return {};
++  }
++  if (s.front() == 'N') {  // nested-name: N <part>+ E
++    s = s.drop_front();
++    std::string out;
++    while (!s.empty() && s.front() != 'E') {
++      std::string part = read_part(s);
++      if (part.empty()) {
++        return {};
++      }
++      if (!out.empty()) {
++        out += "::";
++      }
++      out += part;
++    }
++    return out;
++  }
++  if (is_digit(s.front())) {  // plain unqualified name
++    std::string part = read_part(s);
++    return s.empty() ? part : std::string{};
++  }
++  return {};
++}
++
+ llvm::Expected<ExpressionResult> InterpretExpression(
+     const WasmModule& module,
+     lldb_private::TypeSystem& type_system,
+@@ -148,9 +199,61 @@ llvm::Expected<ExpressionResult> InterpretExpression(
+     return std::move(*e);
+   }
+   auto type = GetCompilerType(ToSBType(result.type()));
+-  auto top_type = GetTopType(type);
+   auto val = result.inner_value();
+ 
++  // Resolve the dynamic (RTTI) type for polymorphic pointers/references so a
++  // `Base*` that actually points to a `Derived` is reported (and expanded) as
++  // `Derived`. LLDB's symbol-based ItaniumABILanguageRuntime can't do this for
++  // wasm modules (the vtable is a DWARF variable, not a linker symbol), so we
++  // follow the Itanium ABI directly: object -> vptr -> type_info -> mangled
++  // name. Only memory reads are needed (no code execution).
++  if (type.IsPointerType() || type.IsReferenceType()) {
++    lldb_private::CompilerType pointee = type.IsPointerType()
++                                             ? type.GetPointeeType()
++                                             : type.GetNonReferenceType();
++    lldb::TypeClass tc = pointee.GetTypeClass();
++    if (tc == lldb::eTypeClassClass || tc == lldb::eTypeClassStruct) {
++      const uint32_t kPtr = 4;  // wasm32
++      auto read_u32 = [&](uint64_t addr, uint32_t& out) -> bool {
++        if (auto r = proxy.ReadMemory(addr, &out, kPtr)) {
++          return *r == kPtr;
++        } else {
++          llvm::consumeError(r.takeError());
++          return false;
++        }
++      };
++      uint64_t obj = val.GetValueAsUnsigned();
++      uint32_t vptr = 0, type_info = 0, name_ptr = 0, offset_to_top = 0;
++      // offset_to_top == 0 means the vptr's subobject is the most-derived
++      // object, so the pointer value already refers to the dynamic object and
++      // can be reinterpreted directly. Skip the multiple/virtual-inheritance
++      // case (non-zero offset) to avoid reporting a wrong address.
++      if (obj && read_u32(obj, vptr) && vptr >= 2 * kPtr &&
++          read_u32(vptr - 2 * kPtr, offset_to_top) && offset_to_top == 0 &&
++          read_u32(vptr - kPtr, type_info) && type_info &&
++          read_u32(type_info + kPtr, name_ptr) && name_ptr) {
++        char name[256] = {0};
++        bool ok = false;
++        if (auto r = proxy.ReadMemory(name_ptr, name, sizeof(name) - 1)) {
++          ok = *r > 0;
++        } else {
++          llvm::consumeError(r.takeError());
++        }
++        if (ok) {
++          std::string dynamic_name = DemangleTypeInfoName(name);
++          std::string static_name = pointee.GetTypeName().AsCString("");
++          if (!dynamic_name.empty() && dynamic_name != static_name) {
++            if (auto dynamic = module.FindType(dynamic_name)) {
++              type = type.IsPointerType() ? dynamic->GetPointerType()
++                                          : dynamic->GetLValueReferenceType();
++            }
++          }
++        }
++      }
++    }
++  }
++
++  auto top_type = GetTopType(type);
+   llvm::Optional<size_t> address;
+   if (auto address_of = val.AddressOf()) {
+     address = address_of.GetValueAsUnsigned();

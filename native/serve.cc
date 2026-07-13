@@ -663,6 +663,368 @@ class Server {
     return BuildRemoteObject(resp, loc, expr);
   }
 
+  // Recognize libc++ (emscripten) std::string. `typeName` is the display name.
+  static bool StartsWith(const std::string& s, const char* p) {
+    return s.rfind(p, 0) == 0;
+  }
+  static bool IsStdStringType(const std::string& n) {
+    return n == "std::string" || n == "std::__2::string" ||
+           StartsWith(n, "std::basic_string<char") ||
+           StartsWith(n, "std::__2::basic_string<char");
+  }
+
+  // Render `size` bytes at `data_addr` as a quoted, printable-escaped string.
+  std::string RenderQuotedString(uint32_t data_addr, uint32_t size) {
+    if (size > 8192) {
+      size = 8192;  // sanity cap for display
+    }
+    std::string out(size, '\0');
+    size_t n = size ? backend_.ReadMemory(data_addr, out.data(), size) : 0;
+    out.resize(n);
+    std::string shown = "\"";
+    for (char c : out) {
+      unsigned char uc = static_cast<unsigned char>(c);
+      if (c == '"' || c == '\\') {
+        shown += '\\';
+        shown += c;
+      } else if (uc >= 0x20 && uc < 0x7f) {
+        shown += c;
+      } else if (c == '\n') {
+        shown += "\\n";
+      } else if (c == '\t') {
+        shown += "\\t";
+      } else {
+        shown += '.';
+      }
+    }
+    shown += "\"";
+    return shown;
+  }
+
+  // Read a libc++ std::string's contents from wasm memory. wasm32 alternate
+  // layout: [__data_ ptr][__size_][__cap_], with the "is long" flag in the high
+  // bit of the last byte; short strings store the chars inline from byte 0 and
+  // the size in the low 7 bits of the last byte.
+  llvm::Optional<std::string> FormatStdString(uint32_t addr) {
+    uint8_t rep[12] = {0};
+    if (backend_.ReadMemory(addr, rep, sizeof(rep)) < sizeof(rep)) {
+      return llvm::None;
+    }
+    auto u32 = [&](int i) {
+      return uint32_t(rep[i]) | (uint32_t(rep[i + 1]) << 8) |
+             (uint32_t(rep[i + 2]) << 16) | (uint32_t(rep[i + 3]) << 24);
+    };
+    bool is_long = (rep[11] & 0x80) != 0;
+    uint32_t data_addr = is_long ? u32(0) : addr;
+    uint32_t size = is_long ? u32(4) : (rep[11] & 0x7F);
+    return RenderQuotedString(data_addr, size);
+  }
+
+  // std::string_view: [__data_ ptr][__size_]. Read the referenced chars.
+  static bool IsStdStringViewType(const std::string& n) {
+    return n == "std::string_view" || n == "std::__2::string_view" ||
+           StartsWith(n, "std::basic_string_view<char") ||
+           StartsWith(n, "std::__2::basic_string_view<char");
+  }
+  llvm::Optional<std::string> FormatStdStringView(uint32_t addr) {
+    uint8_t rep[8] = {0};
+    if (backend_.ReadMemory(addr, rep, sizeof(rep)) < sizeof(rep)) {
+      return llvm::None;
+    }
+    auto u32 = [&](int i) {
+      return uint32_t(rep[i]) | (uint32_t(rep[i + 1]) << 8) |
+             (uint32_t(rep[i + 2]) << 16) | (uint32_t(rep[i + 3]) << 24);
+    };
+    return RenderQuotedString(u32(0), u32(4));
+  }
+
+  // std::map/set/multimap/multiset (libc++, stateless comparator + allocator):
+  // the red-black tree stores its node count in the 3rd word (offset 8).
+  static bool IsStdMapSet(const std::string& n) {
+    return StartsWith(n, "std::map<") || StartsWith(n, "std::set<") ||
+           StartsWith(n, "std::multimap<") || StartsWith(n, "std::multiset<") ||
+           StartsWith(n, "std::__2::map<") || StartsWith(n, "std::__2::set<") ||
+           StartsWith(n, "std::__2::multimap<") ||
+           StartsWith(n, "std::__2::multiset<");
+  }
+  llvm::Optional<std::string> FormatStdMapSet(uint32_t addr) {
+    uint8_t rep[12] = {0};
+    if (backend_.ReadMemory(addr, rep, sizeof(rep)) < sizeof(rep)) {
+      return llvm::None;
+    }
+    uint32_t size = uint32_t(rep[8]) | (uint32_t(rep[9]) << 8) |
+                    (uint32_t(rep[10]) << 16) | (uint32_t(rep[11]) << 24);
+    if (size > 100000000u) {
+      return llvm::None;  // implausible -> not a stateless map/set layout
+    }
+    return std::string("size=") + std::to_string(size);
+  }
+
+  uint32_t ReadU32(uint32_t addr) {
+    uint8_t b[4] = {0};
+    backend_.ReadMemory(addr, b, 4);
+    return uint32_t(b[0]) | (uint32_t(b[1]) << 8) | (uint32_t(b[2]) << 16) |
+           (uint32_t(b[3]) << 24);
+  }
+
+  // In-order walk of a libc++ __tree (map/set), wasm32. Layout:
+  //   tree: [ __begin_node_ @0 ][ end_node.__left_ (root) @4 ][ size @8 ]
+  //   node: [ __left_ @0 ][ __right_ @4 ][ __parent_ @8 ][ __is_black_ @12 ]
+  //         [ __value_ @16 ]
+  // Collects the address of each element's __value_ (node + 16), in key order.
+  void WalkTree(uint32_t tree_addr, uint32_t cap,
+                std::vector<uint32_t>& value_addrs) {
+    const uint32_t end_node = tree_addr + 4;
+    uint32_t x = ReadU32(tree_addr);  // __begin_node_ (leftmost)
+    uint32_t guard = 0;
+    while (x && x != end_node && value_addrs.size() < cap && guard++ < 1000000) {
+      value_addrs.push_back(x + 16);
+      uint32_t r = ReadU32(x + 4);  // __right_
+      if (r) {
+        x = r;
+        uint32_t l;
+        while ((l = ReadU32(x)) != 0) {
+          x = l;  // leftmost of right subtree
+        }
+      } else {
+        uint32_t p = ReadU32(x + 8);  // __parent_
+        while (p && x != ReadU32(p)) {  // while x is a right child
+          x = p;
+          p = ReadU32(x + 8);
+        }
+        x = p;
+      }
+    }
+  }
+
+  static std::string StripConst(std::string s) {
+    while (s.rfind("const ", 0) == 0) {
+      s.erase(0, std::string("const ").size());
+    }
+    while (!s.empty() && s.front() == ' ') {
+      s.erase(s.begin());
+    }
+    while (!s.empty() && s.back() == ' ') {
+      s.pop_back();
+    }
+    return s;
+  }
+
+  // Top-level template arguments of the outermost `<...>` in `name`, e.g.
+  // "std::map<int, int, std::less<int>, A>" -> ["int","int","std::less<int>","A"].
+  static std::vector<std::string> SplitTemplateArgs(const std::string& name) {
+    std::vector<std::string> args;
+    size_t lt = name.find('<');
+    if (lt == std::string::npos) {
+      return args;
+    }
+    int depth = 0;
+    size_t start = lt + 1;
+    for (size_t i = lt; i < name.size(); ++i) {
+      char c = name[i];
+      if (c == '<') {
+        if (++depth == 1) {
+          start = i + 1;
+        }
+      } else if (c == '>') {
+        if (--depth == 0) {
+          args.push_back(StripConst(name.substr(start, i - start)));
+          break;
+        }
+      } else if (c == ',' && depth == 1) {
+        args.push_back(StripConst(name.substr(start, i - start)));
+        start = i + 1;
+      }
+    }
+    return args;
+  }
+
+  // {size, alignment} in bytes for scalar / string types on wasm32; None for
+  // types whose layout we don't model (so map/set entry rendering can bail out).
+  llvm::Optional<std::pair<int, int>> TypeMetrics(const std::string& n0) {
+    std::string n = StripConst(n0);
+    if (!n.empty() && n.back() == '*') {
+      return std::make_pair(4, 4);
+    }
+    if (IsStdStringType(n)) {
+      return std::make_pair(12, 4);
+    }
+    if (IsStdStringViewType(n)) {
+      return std::make_pair(8, 4);
+    }
+    if (n == "bool" || n == "char" || n == "signed char" ||
+        n == "unsigned char") {
+      return std::make_pair(1, 1);
+    }
+    if (n == "short" || n == "unsigned short" || n == "short int" ||
+        n == "unsigned short int") {
+      return std::make_pair(2, 2);
+    }
+    if (n == "int" || n == "unsigned int" || n == "unsigned" ||
+        n == "long" || n == "unsigned long" || n == "long int" ||
+        n == "unsigned long int" || n == "float") {
+      return std::make_pair(4, 4);  // wasm32: long is 4 bytes
+    }
+    if (n == "long long" || n == "unsigned long long" ||
+        n == "long long int" || n == "unsigned long long int" ||
+        n == "double") {
+      return std::make_pair(8, 8);
+    }
+    return llvm::None;
+  }
+
+  // Render a value of (scalar/string) type `name` at raw wasm address `addr`.
+  std::string RenderRawByName(uint32_t addr, const std::string& name0) {
+    std::string name = StripConst(name0);
+    if (IsStdStringType(name)) {
+      if (auto s = FormatStdString(addr)) {
+        return *s;
+      }
+    }
+    if (IsStdStringViewType(name)) {
+      if (auto s = FormatStdStringView(addr)) {
+        return *s;
+      }
+    }
+    if (!name.empty() && name.back() == '*') {
+      char buf[16];
+      std::snprintf(buf, sizeof(buf), "0x%x", ReadU32(addr));
+      return buf;
+    }
+    auto m = TypeMetrics(name);
+    if (!m) {
+      return name;  // unknown layout: show the type name
+    }
+    int size = m->first;
+    uint8_t b[8] = {0};
+    backend_.ReadMemory(addr, b, size);
+    if (name == "bool") {
+      return b[0] ? "true" : "false";
+    }
+    if (name == "float") {
+      float f;
+      std::memcpy(&f, b, 4);
+      return std::to_string(f);
+    }
+    if (name == "double") {
+      double d;
+      std::memcpy(&d, b, 8);
+      return std::to_string(d);
+    }
+    uint64_t raw = 0;
+    for (int i = 0; i < size; ++i) {
+      raw |= uint64_t(b[i]) << (8 * i);
+    }
+    if (name.find("unsigned") != std::string::npos) {
+      return std::to_string(raw);
+    }
+    int64_t sv = static_cast<int64_t>(raw);
+    if (size < 8 && (b[size - 1] & 0x80)) {  // sign-extend
+      sv |= ~((int64_t(1) << (8 * size)) - 1);
+    }
+    return std::to_string(sv);
+  }
+
+  // Render one map/set element at its __value_ address. For a set this is the
+  // element; for a map it is the pair laid out as [key @0][value @off], where
+  // off = align(sizeof(key), alignof(value)).
+  std::string RenderTreeEntry(uint32_t value_addr,
+                              const std::vector<std::string>& args, bool is_map) {
+    if (args.empty()) {
+      return "?";
+    }
+    if (!is_map || args.size() < 2) {
+      return RenderRawByName(value_addr, args[0]);
+    }
+    auto km = TypeMetrics(args[0]);
+    auto vm = TypeMetrics(args[1]);
+    std::string key = RenderRawByName(value_addr, args[0]);
+    if (!km) {
+      return key + " => ?";  // can't locate the value without the key's size
+    }
+    int align = vm ? vm->second : 4;
+    int off = ((km->first + align - 1) / align) * align;
+    return key + " => " + RenderRawByName(value_addr + off, args[1]);
+  }
+
+
+  static bool IsStdVectorType(const std::string& n) {
+    return StartsWith(n, "std::vector<") || StartsWith(n, "std::__2::vector<");
+  }
+
+  // Element count of a libc++ std::vector (wasm32). Element size comes from the
+  // type graph (__begin_'s pointee); count = (__end_ - __begin_) / elem_size.
+  llvm::Optional<uint32_t> StdVectorCount(
+      const symbols_backend::api::EvaluateExpressionResponse& resp,
+      const symbols_backend::api::TypeInfo& root, uint32_t addr) {
+    std::map<std::string, symbols_backend::api::TypeInfo> by_id;
+    for (const auto& ti : resp.GetTypeInfos()) {
+      by_id[ti.GetTypeId()] = ti;
+    }
+    uint32_t elem_size = 0;
+    for (const auto& m : root.GetMembers()) {
+      if (m.GetName() && *m.GetName() == "__begin_") {
+        auto ptr = by_id.find(m.GetTypeId());
+        if (ptr != by_id.end()) {
+          for (const auto& pm : ptr->second.GetMembers()) {
+            auto elem = by_id.find(pm.GetTypeId());
+            if (elem != by_id.end()) {
+              elem_size = static_cast<uint32_t>(elem->second.GetSize());
+            }
+          }
+        }
+      }
+    }
+    if (elem_size == 0) {
+      return llvm::None;
+    }
+    uint8_t rep[8] = {0};
+    if (backend_.ReadMemory(addr, rep, sizeof(rep)) < sizeof(rep)) {
+      return llvm::None;
+    }
+    auto u32 = [&](int i) {
+      return uint32_t(rep[i]) | (uint32_t(rep[i + 1]) << 8) |
+             (uint32_t(rep[i + 2]) << 16) | (uint32_t(rep[i + 3]) << 24);
+    };
+    uint32_t begin = u32(0), end = u32(4);
+    if (end < begin) {
+      return llvm::None;
+    }
+    return (end - begin) / elem_size;
+  }
+
+  llvm::Optional<std::string> FormatStdVector(
+      const symbols_backend::api::EvaluateExpressionResponse& resp,
+      const symbols_backend::api::TypeInfo& root, uint32_t addr) {
+    if (auto n = StdVectorCount(resp, root, addr)) {
+      return std::string("size=") + std::to_string(*n);
+    }
+    return llvm::None;
+  }
+
+  static bool IsStdSmartPtr(const std::string& n) {
+    return StartsWith(n, "std::unique_ptr<") ||
+           StartsWith(n, "std::shared_ptr<") ||
+           StartsWith(n, "std::__2::unique_ptr<") ||
+           StartsWith(n, "std::__2::shared_ptr<");
+  }
+
+  // libc++ unique_ptr/shared_ptr, wasm32: the managed pointer (__ptr_) is the
+  // first word. Report "nullptr" when empty; otherwise keep the default
+  // (expandable) rendering.
+  llvm::Optional<std::string> FormatSmartPtr(uint32_t addr) {
+    uint8_t rep[4] = {0};
+    if (backend_.ReadMemory(addr, rep, sizeof(rep)) < sizeof(rep)) {
+      return llvm::None;
+    }
+    uint32_t ptr = uint32_t(rep[0]) | (uint32_t(rep[1]) << 8) |
+                   (uint32_t(rep[2]) << 16) | (uint32_t(rep[3]) << 24);
+    if (ptr == 0) {
+      return std::string("nullptr");
+    }
+    return llvm::None;
+  }
+
   json::Value BuildRemoteObject(
       const symbols_backend::api::EvaluateExpressionResponse& resp,
       const symbols_backend::api::RawLocation& ctx,
@@ -673,7 +1035,6 @@ class Server {
 
     json::Object ro;
     bool canExpand = root.GetCanExpand();
-    ro["hasChildren"] = canExpand;
     if (!typeName.empty()) {
       ro["className"] = typeName;
     }
@@ -686,6 +1047,44 @@ class Server {
     if (auto d = resp.GetDisplayValue()) {
       desc = *d;
     }
+    // STL pretty-printers: show a meaningful summary in the description while
+    // keeping the object expandable so the raw members are still reachable.
+    if (auto addr = resp.GetMemoryAddress()) {
+      if (IsStdStringType(typeName)) {
+        if (auto s = FormatStdString(*addr)) {
+          desc = *s;
+        }
+      } else if (IsStdStringViewType(typeName)) {
+        if (auto s = FormatStdStringView(*addr)) {
+          desc = *s;
+        }
+      } else if (IsStdVectorType(typeName)) {
+        if (auto s = FormatStdVector(resp, root, *addr)) {
+          desc = *s;
+        }
+      } else if (IsStdMapSet(typeName)) {
+        if (auto s = FormatStdMapSet(*addr)) {
+          desc = *s;
+        }
+      } else if (IsStdSmartPtr(typeName)) {
+        if (auto s = FormatSmartPtr(*addr)) {
+          desc = *s;
+        }
+      }
+    }
+
+    // Formatted string/string_view are non-expandable leaves. std::vector,
+    // std::map/set and non-null smart pointers stay expandable and get
+    // synthesized children in GetProperties; empty containers are leaves.
+    bool leafSummary =
+        IsStdStringType(typeName) || IsStdStringViewType(typeName);
+    bool smartNull = IsStdSmartPtr(typeName) && desc == "nullptr";
+    bool emptyContainer =
+        (IsStdVectorType(typeName) || IsStdMapSet(typeName)) && desc == "size=0";
+    if (leafSummary || smartNull || emptyContainer) {
+      canExpand = false;
+    }
+    ro["hasChildren"] = canExpand;
 
     if (canExpand) {
       ro["type"] = "object";
@@ -695,6 +1094,9 @@ class Server {
                                    ctx.GetInlineFrameIndex(), expr.str(),
                                    stop_id_};
       ro["objectId"] = oid;
+    } else if (leafSummary || smartNull || emptyContainer) {
+      ro["type"] = "object";
+      ro["description"] = desc.empty() ? typeName : desc;
     } else {
       int64_t iv = 0;
       bool haveInt = false;
@@ -746,6 +1148,8 @@ class Server {
       return json::Value(std::move(props));
     }
     symbols_backend::api::TypeInfo root = resp.GetRoot();
+    auto rootNames = root.GetTypeNames();
+    std::string rootType = rootNames.empty() ? std::string() : rootNames.front();
 
     auto addChild = [&](const std::string& name, const std::string& childExpr) {
       auto cresp = api_.EvaluateExpression(loc, childExpr, proxy_);
@@ -759,7 +1163,74 @@ class Server {
     };
 
     if (root.GetIsPointer()) {
-      addChild("*" + so.expression, "*(" + so.expression + ")");
+      // Cast to the (possibly dynamic) pointer type so the dereferenced value
+      // and its members reflect the resolved dynamic type, not the static one
+      // (RTTI resolution in InterpretExpression makes rootType e.g. "Derived *").
+      std::string base = rootType.empty()
+                             ? so.expression
+                             : "(" + rootType + ")(" + so.expression + ")";
+      addChild("*" + so.expression, "*(" + base + ")");
+    } else if (IsStdVectorType(rootType)) {
+      // Synthesize element children [0..N-1] instead of exposing __begin_/
+      // __end_/__cap_. lldb-eval evaluates `(expr).__begin_[i]`.
+      llvm::Optional<uint32_t> count;
+      if (auto addr = resp.GetMemoryAddress()) {
+        count = StdVectorCount(resp, root, *addr);
+      }
+      const uint32_t kCap = 200;
+      uint32_t n = count.value_or(0);
+      uint32_t shown = std::min(n, kCap);
+      for (uint32_t i = 0; i < shown; ++i) {
+        addChild("[" + std::to_string(i) + "]",
+                 "(" + so.expression + ").__begin_[" + std::to_string(i) + "]");
+      }
+      if (n > shown) {
+        json::Object pd;
+        pd["name"] = "[...]";
+        json::Object v;
+        v["type"] = "object";
+        v["description"] = std::to_string(n - shown) + " more elements";
+        v["hasChildren"] = false;
+        pd["value"] = json::Value(std::move(v));
+        props.push_back(std::move(pd));
+      }
+    } else if (IsStdSmartPtr(rootType)) {
+      // Non-null unique_ptr/shared_ptr: show the managed object (the pointee),
+      // not __ptr_/__deleter_. lldb-eval evaluates `*(expr).__ptr_`.
+      addChild("*" + so.expression, "*(" + so.expression + ").__ptr_");
+    } else if (IsStdMapSet(rootType)) {
+      // Traverse the red-black tree in raw memory and render each entry (set:
+      // the value; map: "key => value"). lldb-eval can't cast to the element
+      // (template) type, so entries are built directly from memory here.
+      if (auto addr = resp.GetMemoryAddress()) {
+        std::vector<std::string> args = SplitTemplateArgs(rootType);
+        bool is_map = rootType.find("map<") != std::string::npos;
+        const uint32_t kCap = 200;
+        std::vector<uint32_t> value_addrs;
+        WalkTree(*addr, kCap, value_addrs);
+        for (size_t i = 0; i < value_addrs.size(); ++i) {
+          json::Object pd;
+          pd["name"] = "[" + std::to_string(i) + "]";
+          json::Object v;
+          v["type"] = "object";
+          v["description"] = RenderTreeEntry(value_addrs[i], args, is_map);
+          v["hasChildren"] = false;
+          pd["value"] = json::Value(std::move(v));
+          props.push_back(std::move(pd));
+        }
+        uint32_t total = ReadU32(*addr + 8);
+        if (total > value_addrs.size()) {
+          json::Object pd;
+          pd["name"] = "[...]";
+          json::Object v;
+          v["type"] = "object";
+          v["description"] =
+              std::to_string(total - value_addrs.size()) + " more entries";
+          v["hasChildren"] = false;
+          pd["value"] = json::Value(std::move(v));
+          props.push_back(std::move(pd));
+        }
+      }
     } else {
       for (const auto& m : root.GetMembers()) {
         if (auto name = m.GetName()) {

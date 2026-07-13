@@ -161,6 +161,21 @@ function patchCMake(cxxDir) {
       'if (CMAKE_SYSTEM_NAME STREQUAL "Emscripten")  # @vscode/dwarf-debugging: TS bundle is wasm-only\n' + tscAnchor);
     top = top.replace(tscTarget, tscTarget + '\nendif()  # @vscode/dwarf-debugging TS guard');
   }
+  // (e) Single-module LLDB: define LLDB_API empty so the SB API links statically
+  // (no dllimport/dllexport) into one module. A SHARED liblldb.dll gives the exe
+  // and the DLL each their own LLDB core + PluginManager, so plugins the host
+  // registers aren't visible to the SB API's Target -> expression/value
+  // evaluation returns empty/invalid types and crashes.
+  if (!top.includes('@vscode/dwarf-debugging: LLDB_API')) {
+    const llvmAnchor = 'add_subdirectory(${THIRD_PARTY_DIR}/llvm/src/llvm';
+    if (top.includes(llvmAnchor)) {
+      top = top.replace(llvmAnchor,
+        '# @vscode/dwarf-debugging: LLDB_API empty -> single-module static LLDB.\n' +
+        'add_compile_definitions(LLDB_API=)\n' + llvmAnchor);
+    } else {
+      console.warn('[patch] llvm add_subdirectory anchor not found (LLDB_API skipped).');
+    }
+  }
   writeFileSync(topPath, top);
 
   // (d) -fno-rtti -> /GR- on MSVC (lib/ uses the GCC flag unconditionally).
@@ -170,6 +185,81 @@ function patchCMake(cxxDir) {
       'if (MSVC)\n    target_compile_options(DWARFSymbols PUBLIC /GR-)\n' +
       '  else()\n    ' + rtti + '\n  endif()');
     writeFileSync(libPath, lib);
+  }
+
+  // (f) Build liblldb STATIC. As SHARED it becomes a separate module
+  // (liblldb.dll) that duplicates the LLDB core also linked into the host exe;
+  // see (e). Static -> one copy -> one PluginManager/type-system state.
+  const apiPath = join(cxxDir, 'third_party', 'llvm', 'src', 'lldb',
+    'source', 'API', 'CMakeLists.txt');
+  if (existsSync(apiPath)) {
+    let api = readFileSync(apiPath, 'utf8');
+    if (api.includes('add_lldb_library(liblldb SHARED')) {
+      api = api.replace('add_lldb_library(liblldb SHARED',
+        'add_lldb_library(liblldb STATIC');
+      writeFileSync(apiPath, api);
+    }
+  }
+
+  // (g) lldb-eval expression parser: the in-tree LLVM is configured without a
+  // default target triple, so getDefaultTargetTriple() is empty and
+  // CreateTargetInfo() returns null (null-deref). Every module we inspect is
+  // wasm32, so fall back to that.
+  const parserPath = join(cxxDir, 'third_party', 'lldb-eval', 'src',
+    'lldb-eval', 'parser.cc');
+  if (existsSync(parserPath)) {
+    let parser = readFileSync(parserPath, 'utf8');
+    const tripleFrom = 'tOpts->Triple = llvm::sys::getDefaultTargetTriple();';
+    if (parser.includes(tripleFrom) && !parser.includes('wasm32-unknown-unknown')) {
+      parser = parser.replace(tripleFrom, tripleFrom +
+        '\n  if (tOpts->Triple.empty())  // @vscode/dwarf-debugging: native LLVM has no default triple\n' +
+        '    tOpts->Triple = "wasm32-unknown-unknown";');
+      writeFileSync(parserPath, parser);
+    }
+  }
+}
+
+// Apply the RTTI dynamic-type resolver to lib/Expressions.cc (a code change, so
+// carried as a git patch rather than an inline string edit). Idempotent: skipped
+// if already present. Enables `Base*` -> `Derived*` display via the Itanium ABI
+// (vptr -> type_info -> demangled name -> FindType).
+function patchExpressions(cxxDir) {
+  const exprPath = join(cxxDir, 'lib', 'Expressions.cc');
+  if (!existsSync(exprPath)) return;
+  if (readFileSync(exprPath, 'utf8').includes('DemangleTypeInfoName')) return;
+  const patch = join(nativeDir, 'patches', 'expressions-rtti.patch');
+  if (!existsSync(patch)) {
+    console.warn('[patch] expressions-rtti.patch missing -- RTTI dynamic types disabled.');
+    return;
+  }
+  // The patch has repo-root-relative paths and `git apply` resolves them from
+  // the repository top level, so run it there (not in the cxx_debugging subdir).
+  const top = spawnSync('git', ['-C', cxxDir, 'rev-parse', '--show-toplevel'],
+    { encoding: 'utf8' });
+  const repoRoot = (top.status === 0 && top.stdout) ? top.stdout.trim() : cxxDir;
+  const r = spawnSync('git', ['apply', patch], { cwd: repoRoot, stdio: 'inherit' });
+  if (r.status !== 0) {
+    console.warn('[patch] expressions-rtti.patch did not apply cleanly (context drift?) -- RTTI dynamic types disabled.');
+  }
+}
+
+function patchVariables(cxxDir) {
+  const modPath = join(cxxDir, 'lib', 'WasmModule.cc');
+  if (!existsSync(modPath)) return;
+  // Idempotency guard: skip if the artificial-symbol filter is already present.
+  if (readFileSync(modPath, 'utf8').includes('Itanium ABI symbols')) return;
+  const patch = join(nativeDir, 'patches', 'variables-filter.patch');
+  if (!existsSync(patch)) {
+    console.warn('[patch] variables-filter.patch missing -- "vtable for X" globals not filtered.');
+    return;
+  }
+  // Repo-root-relative paths: apply from the repository top level.
+  const top = spawnSync('git', ['-C', cxxDir, 'rev-parse', '--show-toplevel'],
+    { encoding: 'utf8' });
+  const repoRoot = (top.status === 0 && top.stdout) ? top.stdout.trim() : cxxDir;
+  const r = spawnSync('git', ['apply', patch], { cwd: repoRoot, stdio: 'inherit' });
+  if (r.status !== 0) {
+    console.warn('[patch] variables-filter.patch did not apply cleanly (context drift?) -- "vtable for X" globals not filtered.');
   }
 }
 
@@ -229,6 +319,8 @@ function main() {
   const cxxDir = ensureSources(cfg);
   console.log(`  cxx_debugging : ${cxxDir}`);
   patchCMake(cxxDir);
+  patchExpressions(cxxDir);
+  patchVariables(cxxDir);
   buildNative(cxxDir, buildDir);
   stage(buildDir, outDir);
 }

@@ -1,0 +1,26 @@
+diff --git a/extensions/cxx_debugging/lib/WasmModule.cc b/extensions/cxx_debugging/lib/WasmModule.cc
+index 29aebdd1..b619d6f1 100644
+--- a/extensions/cxx_debugging/lib/WasmModule.cc
++++ b/extensions/cxx_debugging/lib/WasmModule.cc
+@@ -410,12 +410,20 @@ std::set<Variable> WasmModule::GetVariablesInScope(
+   GetVariablesFromOffset(&*module_, offset, inline_frame_index, &var_list);
+   LLVM_DEBUG(llvm::dbgs() << "Found " << var_list.GetSize() << " variables\n");
+   for (auto var : var_list) {
++    llvm::StringRef var_name = var->GetName().GetStringRef();
++    // Skip compiler-generated Itanium ABI symbols such as "vtable for X" or
++    // "typeinfo for X" that clang emits as artificial globals under
++    // -fstandalone-debug. Their names contain spaces, so they are not valid
++    // C++ expressions and break clients that evaluate each global by name.
++    if (var_name.empty() || var_name.contains(' ')) {
++      continue;
++    }
+     var->GetSymbolContextScope()->CalculateSymbolContextCompileUnit();
+     // var_list contains variables sorted from innermost scope to outermost
+     // scope. The set compares variables by name to preserve shadowing order.
+     auto type = var->GetType();
+     variables.insert(
+-        {var->GetName().GetStringRef(), var->GetScope(),
++        {var_name, var->GetScope(),
+          type ? type->GetQualifiedName().GetStringRef() : llvm::StringRef()});
+   }
+   return variables;
