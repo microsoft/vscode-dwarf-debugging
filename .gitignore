@@ -132,3 +132,8 @@ dist
 /chrome-cxx/mnt/extension
 /chrome-cxx/mnt/extension-api.d.ts
 /dist
+
+# Native symbolizer build (host-driven; see native/README.md)
+/native/build/
+/native/.devtools/
+/native/native.config.json

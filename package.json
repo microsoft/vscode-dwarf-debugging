@@ -5,10 +5,12 @@
   "main": "dist/index.js",
   "scripts": {
     "test": "npm run build-meta && tsx test/mandelbrot.test.ts",
-    "build": "npm run build-native-ext-image && npm run copy-out-native-ext && npm run build-meta",
-    "build-meta": "rimraf dist && node esbuild.js && tsc src/index.ts --target es2021 --declaration --emitDeclarationOnly --outDir dist",
-    "build-native-ext-image": "docker build -t cxx-debug-extension ./chrome-cxx",
-    "copy-out-native-ext": "docker run -v ./chrome-cxx/mnt:/mnt cxx-debug-extension /bin/sh /mnt/do-copy.sh",
+    "build": "npm run build:wasm && npm run build-meta && npm run build:native",
+    "build:wasm": "npm run build-wasm-image && npm run copy-out-wasm",
+    "build:native": "node scripts/build-native.mjs",
+    "build-meta": "rimraf dist && node esbuild.js && tsc src/index.ts --target es2021 --declaration --emitDeclarationOnly --outDir dist --skipLibCheck",
+    "build-wasm-image": "docker build -t cxx-debug-extension ./chrome-cxx",
+    "copy-out-wasm": "docker run -v ./chrome-cxx/mnt:/mnt cxx-debug-extension /bin/sh /mnt/do-copy.sh",
     "prepack": "npm run build-meta"
   },
   "author": "Connor Peet <connor@peet.io>",

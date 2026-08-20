@@ -1,0 +1,9 @@
+{
+  "//": "Copy to native.config.json (gitignored) or set the matching env vars. All keys are OPTIONAL -- with none set, the build syncs devtools-frontend into native/.devtools and builds from there.",
+
+  "//cxxDebuggingSrc": "Path to an existing synced devtools-frontend/extensions/cxx_debugging (with third_party/llvm). When set + present, the sync step is skipped.",
+  "cxxDebuggingSrc": "",
+
+  "//devtoolsCheckout": "Where to `fetch devtools-frontend` if cxxDebuggingSrc is not provided (default: native/.devtools).",
+  "devtoolsCheckout": ""
+}
